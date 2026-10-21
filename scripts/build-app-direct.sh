@@ -48,6 +48,27 @@ cp "$B/Blink" "$APP/Contents/MacOS/Blink"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
 cp Resources/Blink.icns "$APP/Contents/Resources/Blink.icns"
 cp -R Resources/ClaudeAdapter "$APP/Contents/Resources/"
+
+# Wire up the "From Claude Code" source if its SDK has been installed into the
+# adapter resources (run `npm install` inside Resources/ClaudeAdapter first).
+# This writes runtime.json pointing at the local Node; with no SDK present the
+# Claude source stays disabled and only the Codex source is available.
+ADAPTER="$APP/Contents/Resources/ClaudeAdapter"
+SDK_REL="node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs"
+if [[ -f "$ADAPTER/$SDK_REL" ]]; then
+  NODE_BIN="${BLINK_NODE:-$(command -v node || true)}"
+  if [[ -n "$NODE_BIN" && -x "$NODE_BIN" ]]; then
+    printf '{"node":"%s","sdkModule":"./%s"}\n' "$NODE_BIN" "$SDK_REL" > "$ADAPTER/runtime.json"
+    printf 'Claude Code source: wired up (node=%s)\n' "$NODE_BIN"
+  else
+    rm -f "$ADAPTER/runtime.json"
+    printf 'Claude Code source: SDK present but no node found; set BLINK_NODE. Claude source disabled.\n'
+  fi
+else
+  rm -f "$ADAPTER/runtime.json"
+  printf 'Claude Code source: SDK not installed; Claude source disabled (Codex source still works).\n'
+fi
+
 chmod +x "$APP/Contents/MacOS/Blink"
 
 # Ad-hoc signing is local-only. No identity, upload, installer or notarization is used.
