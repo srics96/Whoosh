@@ -80,6 +80,7 @@ final class RelayModel: ObservableObject {
     var onDestinationOpened: (() -> Void)?
     private var handoffTask: Task<Void, Never>?
     private var autoFly = false
+    private var resumeBrief = ""
     private var hasExplicitSource = false
     private var autoConnectionAttempted = false
     private var nativeProvider = CodexNativeSourceProvider()
@@ -202,6 +203,7 @@ final class RelayModel: ObservableObject {
         nextStep = ""
         decisions = ""
         verification = ""
+        resumeBrief = ""
     }
 
     func importConversation() {
@@ -257,6 +259,7 @@ final class RelayModel: ObservableObject {
             return
         }
         let captureDiff = includeDiff
+        let brief = resumeBrief
         errorMessage = nil
         transferApproved = false
         stage = .preparing
@@ -272,7 +275,7 @@ final class RelayModel: ObservableObject {
                 phase = .archive
                 let result = try await Task.detached(priority: .userInitiated) {
                     try HandoffWriter.prepare(conversation: conversation, checkpoint: checkpoint,
-                                              projectURL: projectURL, outputParent: outputURL, gitSnapshot: snapshot)
+                                              projectURL: projectURL, outputParent: outputURL, gitSnapshot: snapshot, brief: brief)
                 }.value
                 try Task.checkCancellation()
                 prepared = result
@@ -476,7 +479,7 @@ final class RelayModel: ObservableObject {
         if source == .claude { connectClaude(); return }
         guard let executable = CodexInstallation.detect() else {
             rememberedCLIPath = nil
-            errorMessage = "Codex was not found or its signature could not be verified. Choose your official installation."
+            errorMessage = "Couldn’t find Codex. Install the Codex app (or the Codex CLI) on this Mac, then try again — or pick it manually in Options → Locate Codex helper."
             return
         }
         connectNativeCodex(executable: executable)
@@ -545,7 +548,8 @@ final class RelayModel: ObservableObject {
                     projectURL = URL(fileURLWithPath: cwd)
                 }
                 if projectURL == nil { projectURL = FileManager.default.homeDirectoryForCurrentUser }
-                setAutomaticCheckpoint(title: result.summary.displayName)
+                setAutomaticCheckpoint(ResumeDigest(title: result.summary.displayName,
+                    messages: result.messages.map { ResumeMessage(role: $0.role.rawValue, text: $0.text) }))
                 sensitiveContentBlocked = SensitiveContentScreen.requiresRedaction(archive.data)
                 sourceIdleKnown = result.summary.status?.type == "idle"
                 sourceStopped = true
@@ -604,7 +608,8 @@ final class RelayModel: ObservableObject {
                 if let cwd = info.cwd, (cwd as NSString).isAbsolutePath,
                    (try? URL(fileURLWithPath:cwd).resourceValues(forKeys:[.isDirectoryKey]).isDirectory) == true { projectURL = URL(fileURLWithPath:cwd) }
                 if projectURL == nil { projectURL = FileManager.default.homeDirectoryForCurrentUser }
-                setAutomaticCheckpoint(title:info.summary)
+                setAutomaticCheckpoint(ResumeDigest(title: info.summary,
+                    messages: (result.digest ?? []).map { ResumeMessage(role: $0.role, text: $0.text) }))
                 sensitiveContentBlocked = SensitiveContentScreen.requiresRedaction(archive.data)
                 sourceIdleKnown = false; sourceStopped = true
                 conversationNotice = notice
@@ -617,10 +622,15 @@ final class RelayModel: ObservableObject {
     }
 
     private func setAutomaticCheckpoint(title: String) {
-        goal = "Selected conversation: " + title
-        nextStep = "Read the archived conversation and report its last known status and any explicitly recorded next step. If no next step is recorded, say it is unknown. Do not make changes or take actions without new user instructions."
-        decisions = "Not inferred. Consult the selected conversation for recorded decisions."
-        verification = "History is an API snapshot or selected export, not independent verification of project state."
+        setAutomaticCheckpoint(ResumeDigest(title: title, messages: []))
+    }
+
+    private func setAutomaticCheckpoint(_ digest: ResumeDigest) {
+        goal = digest.goal
+        nextStep = digest.nextStep
+        decisions = "See the transcript and BRIEF.md for recorded decisions; ask rather than invent."
+        verification = "History is a transcript snapshot, not independent verification of current project state. Inspect the working tree before changing it."
+        resumeBrief = digest.brief
     }
 
     func readNativeUsage() {

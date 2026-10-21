@@ -7,6 +7,7 @@ struct ClaudeSessionInfo: Decodable, Sendable {
     let lastModified: Double
     let fileSize: Double?
 }
+struct ClaudeDigestMessage: Decodable, Sendable { let role: String; let text: String }
 struct ClaudeAdapterResponse: Decodable, Sendable {
     let sessions: [ClaudeSessionInfo]?
     let nextOffset: Int?
@@ -14,6 +15,7 @@ struct ClaudeAdapterResponse: Decodable, Sendable {
     let archive: String?
     let partial: Bool?
     let notice: String?
+    let digest: [ClaudeDigestMessage]?
 }
 struct ClaudeSessionAdapter: Sendable {
     var available: Bool { Bundle.main.url(forResource: "runtime", withExtension: "json", subdirectory: "ClaudeAdapter") != nil }
@@ -21,8 +23,15 @@ struct ClaudeSessionAdapter: Sendable {
         guard let resource = Bundle.main.url(forResource: "adapter", withExtension: "mjs", subdirectory: "ClaudeAdapter"),
               let configURL = Bundle.main.url(forResource: "runtime", withExtension: "json", subdirectory: "ClaudeAdapter"),
               let config = try JSONSerialization.jsonObject(with: Data(contentsOf: configURL)) as? [String:String],
-              let node = config["node"], node.hasPrefix("/"), FileManager.default.isExecutableFile(atPath: node)
+              let configuredNode = config["node"]
         else { throw NSError(domain: "Blink", code: 1, userInfo: [NSLocalizedDescriptionKey: "Local Claude Code connection is not installed in this build."]) }
+        // An absolute path is a developer machine's own Node; a relative path is a Node runtime bundled
+        // inside the app, resolved against the ClaudeAdapter resource directory so it works once installed anywhere.
+        let node = configuredNode.hasPrefix("/") ? configuredNode
+            : configURL.deletingLastPathComponent().appendingPathComponent(configuredNode).standardizedFileURL.path
+        guard FileManager.default.isExecutableFile(atPath: node) else {
+            throw NSError(domain: "Blink", code: 1, userInfo: [NSLocalizedDescriptionKey: "Local Claude Code connection is not installed in this build."])
+        }
         var request: [String:Any] = ["action":action,"offset":offset]
         request["id"] = id; request["dir"] = dir
         let input = try JSONSerialization.data(withJSONObject: request)
