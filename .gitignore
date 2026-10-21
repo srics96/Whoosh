@@ -1,0 +1,14 @@
+.build/
+.swiftpm/
+dist/
+.DS_Store
+*.xcuserstate
+
+# Private runtime handoff archives never belong in the public source tree.
+Blink-*/
+Relay-*/
+
+# Local builds and installed dependencies
+dist-next/
+node_modules/
+Resources/ClaudeAdapter/runtime.json
