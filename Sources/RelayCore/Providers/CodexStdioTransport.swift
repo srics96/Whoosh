@@ -232,7 +232,7 @@ enum CodexPipeReader {
 struct CodexRPCLineFramer: Sendable {
     private var buffer = Data()
     private let maximumLineBytes: Int
-    init(maximumLineBytes: Int = 8 * 1024 * 1024) { self.maximumLineBytes = maximumLineBytes }
+    init(maximumLineBytes: Int = 64 * 1024 * 1024) { self.maximumLineBytes = maximumLineBytes }
     mutating func append(_ data: Data) throws -> [Data] {
         buffer.append(data)
         var lines: [Data] = []

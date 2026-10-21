@@ -158,9 +158,10 @@ final class RelayModel: ObservableObject {
         highlightedID = rows[max(0, min(rows.count - 1, current + delta))].id
     }
 
-    /// Context-aware Return: connect first if needed, otherwise fly the highlighted chat.
+    /// Context-aware Return: reset after a finished handoff, connect if needed, else fly the highlighted chat.
     func activatePrimary() {
         guard !isBusy else { return }
+        if stage == .complete || stage == .review { startAgain(); return }
         if !nativeConnected { reconnectNativeCodex(); return }
         flyHighlighted()
     }
@@ -552,7 +553,7 @@ final class RelayModel: ObservableObject {
                 ok = true
             } catch CodexSourceError.responseTooLarge {
                 nativeConnected = false
-                errorMessage = "Full history exceeds the 32 MiB capture budget. No continuation was prepared. Use a complete explicit export or reduce source attachments."
+                errorMessage = "Full history exceeds the 240 MiB capture budget. No continuation was prepared. Use a complete explicit export or reduce source attachments."
             } catch is CancellationError {
                 nativeConnected = false
                 errorMessage = "History capture cancelled. Reconnect to choose a chat."
