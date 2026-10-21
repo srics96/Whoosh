@@ -212,8 +212,10 @@ struct RelayOverlay: View {
                 Text(flightSubtitle).font(.system(size: 13)).foregroundStyle(.white.opacity(0.6))
                     .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true).frame(maxWidth: 460)
             }
-            if model.stage == .review {
-                Button("Try again") { model.editCheckpoint(); model.flyHighlighted() }.buttonStyle(RelaySecondaryButton())
+            if model.stage == .complete {
+                Button("New handoff  ↵") { model.startAgain() }.buttonStyle(RelaySecondaryButton())
+            } else if model.stage == .review {
+                Button("Back to chats") { model.startAgain() }.buttonStyle(RelaySecondaryButton())
             }
         }
         .frame(maxWidth: .infinity).padding(.vertical, 46).padding(.horizontal, 24)

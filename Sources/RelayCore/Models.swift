@@ -42,7 +42,7 @@ public struct Checkpoint: Codable, Equatable, Sendable {
 }
 
 public struct ImportedConversation: Sendable {
-    public static let maximumBytes = 64 * 1024 * 1024
+    public static let maximumBytes = 256 * 1024 * 1024
     public let fileName: String
     public let data: Data
     public let sha256: String
@@ -64,7 +64,7 @@ public struct ImportedConversation: Sendable {
             throw RelayError.invalidInput("Choose an exported .txt, .md or .json conversation.")
         }
         guard !data.isEmpty, data.count <= Self.maximumBytes else {
-            throw RelayError.invalidInput("Choose a nonempty conversation export smaller than 64 MiB.")
+            throw RelayError.invalidInput("Choose a nonempty conversation export smaller than 256 MiB.")
         }
         self.fileName = URL(fileURLWithPath: fileName).lastPathComponent
         self.data = data
@@ -80,7 +80,7 @@ public struct ImportedConversation: Sendable {
         let values = try url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey])
         guard values.isRegularFile == true, values.isSymbolicLink != true,
               let size = values.fileSize, size > 0, size <= maximumBytes else {
-            throw RelayError.invalidInput("Select a regular exported conversation file, not a link or folder, smaller than 64 MiB.")
+            throw RelayError.invalidInput("Select a regular exported conversation file, not a link or folder, smaller than 256 MiB.")
         }
         return try Self(fileName: url.lastPathComponent, data: Data(contentsOf: url))
     }

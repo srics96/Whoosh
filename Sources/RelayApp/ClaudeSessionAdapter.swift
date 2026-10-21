@@ -46,12 +46,12 @@ struct ClaudeSessionAdapter: Sendable {
             defer { try? diagnosticHandle.close() }
             process.standardError = diagnosticHandle
             try process.run()
-            let deadline = Date().addingTimeInterval(20)
+            let deadline = Date().addingTimeInterval(180)
             while process.isRunning && Date() < deadline { try await Task.sleep(nanoseconds: 50_000_000) }
             if process.isRunning {
                 process.terminate()
                 let phase = ((try? String(contentsOf: diagnostic)) ?? "").components(separatedBy: "\n").filter { ["BLINK:started", "BLINK:config-loaded", "BLINK:sdk-loaded", "BLINK:read-complete"].contains($0) }.last ?? "before helper startup"
-                throw NSError(domain:"Blink",code:3,userInfo:[NSLocalizedDescriptionKey:"Claude connection timed out after 20 seconds (\(phase)). No agent was started."])
+                throw NSError(domain:"Blink",code:3,userInfo:[NSLocalizedDescriptionKey:"Claude connection timed out after 180 seconds (\(phase)). No agent was started."])
             }
             guard process.terminationStatus == 0 else {
                 let allowed = ["Session identity mismatch", "Project mismatch", "Source changed; stop it and select again", "No readable messages", "Unstable pagination", "History exceeds safe capture size", "Invalid session", "Unsupported operation", "Reader unavailable"]
@@ -60,7 +60,7 @@ struct ClaudeSessionAdapter: Sendable {
                 throw NSError(domain:"Blink",code:2,userInfo:[NSLocalizedDescriptionKey:"Claude Code: \(reason). No agent was started."])
             }
             let size = try output.resourceValues(forKeys:[.fileSizeKey]).fileSize ?? 0
-            guard size <= 40*1024*1024 else { throw NSError(domain:"Blink",code:4,userInfo:[NSLocalizedDescriptionKey:"Claude history exceeds the capture limit."]) }
+            guard size <= 256*1024*1024 else { throw NSError(domain:"Blink",code:4,userInfo:[NSLocalizedDescriptionKey:"Claude history exceeds the capture limit."]) }
             let data = try Data(contentsOf: output)
             return try JSONDecoder().decode(ClaudeAdapterResponse.self, from: data)
         }.value

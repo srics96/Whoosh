@@ -149,6 +149,8 @@ final class RelayAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func showOverlay() {
+        // A fresh hotkey press always starts a new handoff, never the previous one's result screen.
+        if model.stage == .complete || model.stage == .review { model.startAgain() }
         // Capture foreground context BEFORE Blink becomes active. It suggests a source app, never a thread.
         model.suggestSource(from: NSWorkspace.shared.frontmostApplication)
         model.restoreConnectionIfApproved()
