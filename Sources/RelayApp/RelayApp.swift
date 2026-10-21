@@ -27,6 +27,9 @@ final class RelayAppDelegate: NSObject, NSApplicationDelegate {
     private var panel: RelayPanel?
     private var shortcutItems: [NSMenuItem] = []
     private var isTerminating = false
+    private var keyMonitor: Any?
+    /// Distance of the panel's top edge from the top of the screen, as a fraction of usable height.
+    private let topFraction: CGFloat = 0.14
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -37,6 +40,7 @@ final class RelayAppDelegate: NSObject, NSApplicationDelegate {
             self?.showOverlay()
         }
         configureStatusItem()
+        installKeyMonitor()
         let saved = UserDefaults.standard.string(forKey: "relayShortcut")
             .flatMap(HotKeyController.Shortcut.init(rawValue:)) ?? .commandShiftSpace
         if hotKey.register(saved) {
@@ -47,6 +51,7 @@ final class RelayAppDelegate: NSObject, NSApplicationDelegate {
         }
         model.shortcutDiagnostic = hotKey.diagnostic
         updateShortcutChecks()
+        FileHandle.standardError.write(Data("Blink: global hotkey \(model.shortcutLabel) registered=\(hotKey.selected != nil) [\(hotKey.diagnostic)]\n".utf8))
         showOverlay()
     }
 
@@ -144,36 +149,70 @@ final class RelayAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func showOverlay() {
-        // Capture foreground context BEFORE Relay becomes active. It suggests an app, never a thread.
-        let foreground = NSWorkspace.shared.frontmostApplication
-        model.suggestSource(from: foreground)
+        // Capture foreground context BEFORE Blink becomes active. It suggests a source app, never a thread.
+        model.suggestSource(from: NSWorkspace.shared.frontmostApplication)
         model.restoreConnectionIfApproved()
-        if panel == nil {
-            let availableHeight = (NSScreen.main?.visibleFrame.height ?? 820) - 40
-            let window = RelayPanel(contentRect: NSRect(x: 0, y: 0, width: 580, height: min(680, max(460, availableHeight))),
-                                    styleMask: [.titled, .closable, .fullSizeContentView],
-                                    backing: .buffered, defer: false)
-            window.onCancel = { [weak self] in self?.model.cancelSourceRead(); self?.model.cancelPreparation() }
-            model.onDestinationOpened = { [weak window] in window?.orderOut(nil) }
-            window.title = "Blink"
-            window.titleVisibility = .hidden
-            window.titlebarAppearsTransparent = true
-            window.standardWindowButton(.closeButton)?.isHidden = true
-            window.standardWindowButton(.miniaturizeButton)?.isHidden = true
-            window.standardWindowButton(.zoomButton)?.isHidden = true
-            window.isMovableByWindowBackground = true
-            window.isReleasedWhenClosed = false
-            window.level = .floating
-            window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-            window.animationBehavior = .utilityWindow
-            window.backgroundColor = NSColor(calibratedRed: 0.055, green: 0.063, blue: 0.09, alpha: 1)
-            window.hasShadow = true
-            window.contentView = NSHostingView(rootView: RelayOverlay(model: model, close: { [weak window] in window?.onCancel?(); window?.orderOut(nil) }))
-            window.center()
-            panel = window
-        }
+        if panel == nil { panel = makePanel() }
+        model.nativeSearch = ""
+        model.errorMessage = nil
+        model.ensureHighlight()
         NSApp.activate(ignoringOtherApps: true)
         panel?.makeKeyAndOrderFront(nil)
+        pinTopEdge()
+    }
+
+    private func makePanel() -> RelayPanel {
+        let window = RelayPanel(contentRect: NSRect(x: 0, y: 0, width: 680, height: 420),
+                                styleMask: [.borderless], backing: .buffered, defer: false)
+        window.onCancel = { [weak self] in self?.model.cancelSourceRead(); self?.model.cancelPreparation() }
+        model.onDestinationOpened = { [weak self] in self?.hideOverlay() }
+        window.isReleasedWhenClosed = false
+        window.isMovableByWindowBackground = true
+        window.isOpaque = false
+        window.backgroundColor = .clear
+        window.hasShadow = true    // A clear borderless window casts its shadow from the content's alpha, so it follows the rounded card
+        window.level = .floating
+        // Normally the panel dismisses when you click away; BLINK_DEBUG_PIN keeps it up for headless UI checks.
+        window.hidesOnDeactivate = ProcessInfo.processInfo.environment["BLINK_DEBUG_PIN"] == nil
+        window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
+        window.animationBehavior = .utilityWindow
+        let controller = NSHostingController(rootView: RelayOverlay(model: model, close: { [weak self] in self?.hideOverlay() }))
+        controller.sizingOptions = [.preferredContentSize]
+        window.contentViewController = controller
+        NotificationCenter.default.addObserver(forName: NSWindow.didResizeNotification, object: window, queue: .main) { [weak self] _ in
+            self?.pinTopEdge()
+        }
+        return window
+    }
+
+    /// Keep the panel's top edge at a fixed height while its content grows or shrinks (Spotlight-style).
+    private func pinTopEdge() {
+        guard let panel, let screen = panel.screen ?? NSScreen.main else { return }
+        let vf = screen.visibleFrame
+        let top = vf.maxY - vf.height * topFraction
+        panel.setFrameOrigin(NSPoint(x: vf.minX + (vf.width - panel.frame.width) / 2,
+                                     y: top - panel.frame.height))
+    }
+
+    private func hideOverlay() {
+        panel?.onCancel?()
+        panel?.orderOut(nil)
+    }
+
+    private func installKeyMonitor() {
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self, let panel = self.panel, panel.isKeyWindow else { return event }
+            // Let ⌘/⌃/⌥ combinations (copy, paste, quit) reach their normal handlers.
+            if !event.modifierFlags.intersection([.command, .control, .option]).isEmpty { return event }
+            switch event.keyCode {
+            case 125: self.model.moveHighlight(1); return nil      // ↓
+            case 126: self.model.moveHighlight(-1); return nil     // ↑
+            case 36, 76: self.model.activatePrimary(); return nil  // Return / keypad Enter
+            case 48: self.model.swapApps(); return nil             // Tab
+            case 53: self.hideOverlay(); return nil                // Esc
+            default: return event
+            }
+        }
     }
 
     @objc private func quitRelay() { NSApp.terminate(nil) }

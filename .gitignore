@@ -9,6 +9,7 @@ Blink-*/
 Relay-*/
 
 # Local builds and installed dependencies
+.build-direct/
 dist-next/
 node_modules/
 Resources/ClaudeAdapter/runtime.json
