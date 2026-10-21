@@ -10,6 +10,7 @@ Relay-*/
 
 # Local builds and installed dependencies
 .build-direct/
+.dmg-cache/
 dist-next/
 node_modules/
 Resources/ClaudeAdapter/runtime.json
