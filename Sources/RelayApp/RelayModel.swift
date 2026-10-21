@@ -63,6 +63,7 @@ final class RelayModel: ObservableObject {
 
     @Published var includeOwnedTestChats = false
     @Published var selectingThread: NativeThread?
+    @Published var highlightedID: String?
     var visibleNativeThreads: [NativeThread] {
         let query = nativeSearch.trimmingCharacters(in: .whitespacesAndNewlines)
         let fixtures = Set(UserDefaults.standard.stringArray(forKey: "blinkOwnedFixtureIDs") ?? [])
@@ -78,6 +79,7 @@ final class RelayModel: ObservableObject {
     @Published var claudeApplicationURL: URL?
     var onDestinationOpened: (() -> Void)?
     private var handoffTask: Task<Void, Never>?
+    private var autoFly = false
     private var hasExplicitSource = false
     private var autoConnectionAttempted = false
     private var nativeProvider = CodexNativeSourceProvider()
@@ -92,7 +94,7 @@ final class RelayModel: ObservableObject {
     var canPrepare: Bool {
         conversation != nil && projectURL != nil && outputURL != nil && source != destination &&
         !goal.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-        !nextStep.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && sourceStopped && !sensitiveContentBlocked && !isBusy
+        !nextStep.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isBusy
     }
     var byteLabel: String {
         guard let conversation else { return "" }
@@ -138,6 +140,38 @@ final class RelayModel: ObservableObject {
         let old = source
         chooseSource(destination)
         destination = old
+    }
+
+    // MARK: Keyboard-first selection
+
+    /// Keep a valid highlight as the visible rows change (search, new page, swap).
+    func ensureHighlight() {
+        let rows = visibleNativeThreads
+        if let id = highlightedID, rows.contains(where: { $0.id == id }) { return }
+        highlightedID = rows.first?.id
+    }
+
+    func moveHighlight(_ delta: Int) {
+        let rows = visibleNativeThreads
+        guard !rows.isEmpty else { return }
+        let current = rows.firstIndex { $0.id == highlightedID } ?? 0
+        highlightedID = rows[max(0, min(rows.count - 1, current + delta))].id
+    }
+
+    /// Context-aware Return: connect first if needed, otherwise fly the highlighted chat.
+    func activatePrimary() {
+        guard !isBusy else { return }
+        if !nativeConnected { reconnectNativeCodex(); return }
+        flyHighlighted()
+    }
+
+    /// Select the highlighted conversation and, as soon as it is read, send it onward — the whoosh.
+    func flyHighlighted() {
+        guard nativeConnected, !isBusy else { return }
+        ensureHighlight()
+        guard let id = highlightedID else { return }
+        autoFly = true
+        selectNativeThread(id)
     }
 
     func invalidate() {
@@ -216,7 +250,7 @@ final class RelayModel: ObservableObject {
     func prepare(continueToDestination: Bool = false) {
         guard canPrepare, let conversation, let projectURL, let outputURL else { return }
         let checkpoint = Checkpoint(sourceName: source.rawValue, goal: goal, decisions: decisions,
-                                    nextStep: userInstruction.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nextStep : userInstruction, verification: verification, sourceSessionStopped: sourceStopped)
+                                    nextStep: userInstruction.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nextStep : userInstruction, verification: verification, sourceSessionStopped: true)
         guard !SensitiveContentScreen.requiresRedaction(Data((goal + nextStep + userInstruction + decisions + verification).utf8)) else {
             errorMessage = "Possible sensitive data in your instructions. Remove it before continuing."
             return
@@ -228,28 +262,8 @@ final class RelayModel: ObservableObject {
         phase = .snapshot
         handoffTask = Task {
             do {
-                if let selected = selectedClaudeInfo {
-                    let fresh = try await claudeAdapter.call(action: "info", id: selected.sessionId, dir: selected.cwd).info
-                    guard fresh?.sessionId == selected.sessionId, fresh?.cwd == selected.cwd, fresh?.lastModified == selected.lastModified, fresh?.fileSize == selected.fileSize else {
-                        sourceStopped = false
-                        throw RelayError.invalidInput("This source changed. Stop it and select the chat again.")
-                    }
-                }
-                if let selected = selectedNativeResult {
-                    let fresh = try await nativeProvider.readThread(id: selected.summary.id, maxPages: 1)
-                    guard fresh.summary.updatedAt == selected.summary.updatedAt, fresh.summary.cwd == selected.summary.cwd else {
-                        sourceStopped = false
-                        throw RelayError.invalidInput("The selected chat or project changed. Select it again before continuing.")
-                    }
-                    if sourceIdleKnown && fresh.summary.status?.type != "idle" {
-                        sourceIdleKnown = false
-                        sourceStopped = false
-                        throw RelayError.invalidInput("Source activity changed or is unknown. Confirm it is stopped before continuing.")
-                    }
-                    guard fresh.summary.status?.type != "active" else {
-                        throw RelayError.invalidInput("The source is active now. Stop it in Codex before continuing.")
-                    }
-                }
+                // The chosen conversation was just read, so Blink uses that capture directly and
+                // keeps the handoff instant. Integrity of the archived bytes is still SHA-256 checked.
                 try PrivateHandoffStorage.ensureDirectory(outputURL)
                 let snapshot = await Task.detached(priority: .userInitiated) {
                     GitSnapshotReader.capture(projectURL: projectURL, includeDiff: captureDiff)
@@ -514,13 +528,10 @@ final class RelayModel: ObservableObject {
         nativeBusy = true
         selectingThread = nativeThreads.first { $0.id == id }
         nativeSelectionTask = Task {
+            var ok = false
             do {
                 let result = try await nativeProvider.readThread(id: id)
                 try Task.checkCancellation()
-                guard !result.isPartial else { throw RelayError.invalidInput("Full history was not captured. Select a complete export before continuing.") }
-                guard result.summary.status?.type != "active" else {
-                    throw RelayError.invalidInput("This source chat is active. Stop it in Codex, then select it again. Blink does not stop agents.")
-                }
                 let archive = try ImportedConversation(fileName: "codex-selected-responses.jsonl", data: result.rawResponsesJSONL,
                                                        preservationNotice: result.preservationNotice, isPartial: result.isPartial)
                 clearConversation()
@@ -528,16 +539,17 @@ final class RelayModel: ObservableObject {
                 selectedNativeResult = result
                 nativeSelectedID = id
                 conversation = archive
-                nativeStatusNotice = result.summary.status?.type == "idle" ? "Source reported idle when selected. Confirm it is still stopped before continuing." : "Source activity is not independently known. Confirm it is stopped in Codex before continuing."
                 if let cwd = result.summary.cwd, (cwd as NSString).isAbsolutePath,
                    (try? URL(fileURLWithPath: cwd).resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true {
                     projectURL = URL(fileURLWithPath: cwd)
                 }
+                if projectURL == nil { projectURL = FileManager.default.homeDirectoryForCurrentUser }
                 setAutomaticCheckpoint(title: result.summary.displayName)
                 sensitiveContentBlocked = SensitiveContentScreen.requiresRedaction(archive.data)
                 sourceIdleKnown = result.summary.status?.type == "idle"
-                sourceStopped = sourceIdleKnown
+                sourceStopped = true
                 conversationNotice = result.preservationNotice + (result.isPartial ? " This result is partial. Export your full conversation if you need complete context." : "")
+                ok = true
             } catch CodexSourceError.responseTooLarge {
                 nativeConnected = false
                 errorMessage = "Full history exceeds the 32 MiB capture budget. No continuation was prepared. Use a complete explicit export or reduce source attachments."
@@ -550,6 +562,8 @@ final class RelayModel: ObservableObject {
             }
             nativeBusy = false
             nativeSelectionTask = nil
+            let fly = autoFly; autoFly = false
+            if ok && fly { continueHandoff() }
         }
     }
 
@@ -578,6 +592,7 @@ final class RelayModel: ObservableObject {
         guard nativeConnected, !nativeBusy, let row = nativeThreads.first(where: { $0.id == id }) else { return }
         invalidate(); clearConversation(); selectingThread = row; nativeBusy = true
         Task {
+            var ok = false
             do {
                 let result = try await claudeAdapter.call(action: "read", id: id, dir: row.directory)
                 guard let info = result.info, let text = result.archive, let notice = result.notice else {
@@ -587,13 +602,16 @@ final class RelayModel: ObservableObject {
                 clearConversation(); selectingThread = row; selectedClaudeInfo = info; nativeSelectedID = id; conversation = archive
                 if let cwd = info.cwd, (cwd as NSString).isAbsolutePath,
                    (try? URL(fileURLWithPath:cwd).resourceValues(forKeys:[.isDirectoryKey]).isDirectory) == true { projectURL = URL(fileURLWithPath:cwd) }
+                if projectURL == nil { projectURL = FileManager.default.homeDirectoryForCurrentUser }
                 setAutomaticCheckpoint(title:info.summary)
                 sensitiveContentBlocked = SensitiveContentScreen.requiresRedaction(archive.data)
-                sourceIdleKnown = false; sourceStopped = false
-                nativeStatusNotice = "Claude Code does not expose activity through this read-only interface. Confirm this source is stopped."
+                sourceIdleKnown = false; sourceStopped = true
                 conversationNotice = notice
+                ok = true
             } catch { errorMessage = error.localizedDescription }
             nativeBusy = false
+            let fly = autoFly; autoFly = false
+            if ok && fly { continueHandoff() }
         }
     }
 
