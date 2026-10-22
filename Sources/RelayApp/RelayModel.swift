@@ -38,7 +38,7 @@ final class RelayModel: ObservableObject {
     @Published var conversation: ImportedConversation?
     @Published var conversationNotice: String?
     @Published var projectURL: URL?
-    @Published var outputURL: URL? = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?.appendingPathComponent("Blink/Handoffs", isDirectory: true)
+    @Published var outputURL: URL? = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?.appendingPathComponent("Whoosh/Handoffs", isDirectory: true)
     @Published var prepared: PreparedHandoff?
     @Published var errorMessage: String?
     @Published var foregroundHint = "Choose a source app and a conversation."
@@ -55,7 +55,7 @@ final class RelayModel: ObservableObject {
     @Published var nativeSearch = ""
     @Published var shortcutActivationCount = 0
     @Published var shortcutDiagnostic = "Not registered"
-    @Published var reduceMotionInBlink = false
+    @Published var reduceMotionInWhoosh = false
     @Published var rememberedCLIPath = CodexInstallation.detect()?.path
     @Published var nativeStatusNotice: String?
     @Published var sensitiveContentBlocked = false
@@ -108,7 +108,7 @@ final class RelayModel: ObservableObject {
     }
     var transferDescription: String {
         destination == .claude
-            ? "Open a new Claude draft with this bootstrap and local archive references. Claude may ask you to confirm the project folder. Reading the files may require access approval. Nothing is submitted by Blink."
+            ? "Open a new Claude draft with this bootstrap and local archive references. Claude may ask you to confirm the project folder. Reading the files may require access approval. Nothing is submitted by Whoosh."
             : "Open a new Codex draft with this bootstrap and local archive references. Codex receives the draft text; reading the files may require access approval. Nothing is submitted. Verify the draft before sending."
     }
 
@@ -124,7 +124,7 @@ final class RelayModel: ObservableObject {
             source = .codex; destination = .claude
             foregroundHint = "Codex was in front. Choose the conversation to move."
         } else {
-            foregroundHint = "Choose a source app. Blink does not inspect your active chat."
+            foregroundHint = "Choose a source app. Whoosh does not inspect your active chat."
         }
     }
 
@@ -210,7 +210,7 @@ final class RelayModel: ObservableObject {
         guard !isBusy else { return }
         let panel = NSOpenPanel()
         panel.title = "Choose one exported conversation"
-        panel.message = "Blink reads only this file. Its original bytes are preserved in the handoff archive."
+        panel.message = "Whoosh reads only this file. Its original bytes are preserved in the handoff archive."
         panel.allowedContentTypes = [.plainText, .json, UTType(filenameExtension: "md") ?? .plainText]
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
@@ -235,7 +235,7 @@ final class RelayModel: ObservableObject {
     func chooseFolder(output: Bool) {
         let panel = NSOpenPanel()
         panel.title = output ? "Choose where to save this handoff" : "Choose your project folder"
-        panel.message = output ? "Choose a private, non-synced folder. Blink creates a new handoff folder here; existing sharing, cloud sync or Git can disclose its contents." : "Blink reads Git metadata here. It never changes project files."
+        panel.message = output ? "Choose a private, non-synced folder. Whoosh creates a new handoff folder here; existing sharing, cloud sync or Git can disclose its contents." : "Whoosh reads Git metadata here. It never changes project files."
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.canCreateDirectories = output
@@ -266,7 +266,7 @@ final class RelayModel: ObservableObject {
         phase = .snapshot
         handoffTask = Task {
             do {
-                // The chosen conversation was just read, so Blink uses that capture directly and
+                // The chosen conversation was just read, so Whoosh uses that capture directly and
                 // keeps the handoff instant. Integrity of the archived bytes is still SHA-256 checked.
                 try PrivateHandoffStorage.ensureDirectory(outputURL)
                 let snapshot = await Task.detached(priority: .userInitiated) {
@@ -363,7 +363,7 @@ final class RelayModel: ObservableObject {
                     self.stage = .review
                 } else if app != nil {
                     self.completionTitle = "Draft requested in Claude"
-                    self.completionDetail = "Check Claude’s new composer for the bootstrap. Blink cannot confirm that Claude displayed or read it. Nothing was submitted by Blink. Review before sending."
+                    self.completionDetail = "Check Claude’s new composer for the bootstrap. Whoosh cannot confirm that Claude displayed or read it. Nothing was submitted by Whoosh. Review before sending."
                     self.stage = .complete
                     self.onDestinationOpened?()
                 } else {
@@ -377,7 +377,7 @@ final class RelayModel: ObservableObject {
     func chooseCodexApplication() {
         let panel = NSOpenPanel()
         panel.title = "Choose the Codex application"
-        panel.message = "Blink will only open this app after your review. It cannot load a conversation into Codex."
+        panel.message = "Whoosh will only open this app after your review. It cannot load a conversation into Codex."
         panel.allowedContentTypes = [.application]
         panel.directoryURL = URL(fileURLWithPath: "/Applications")
         panel.allowsMultipleSelection = false
@@ -417,7 +417,7 @@ final class RelayModel: ObservableObject {
                         self.stage = .review
                     } else if app != nil {
                         self.completionTitle = "Draft requested in Codex"
-                        self.completionDetail = "Check the new composer for the bootstrap. Blink cannot confirm that Codex displayed or read it. Nothing was submitted by Blink. Review before sending."
+                        self.completionDetail = "Check the new composer for the bootstrap. Whoosh cannot confirm that Codex displayed or read it. Nothing was submitted by Whoosh. Review before sending."
                         self.stage = .complete
                     self.onDestinationOpened?()
                     } else {
@@ -461,7 +461,7 @@ final class RelayModel: ObservableObject {
         guard !isBusy else { return }
         let panel = NSOpenPanel()
         panel.title = "Select your installed Codex CLI"
-        panel.message = "Blink starts your selected Codex CLI with its own ordinary configuration and account, and reads the local histories it exposes. Blink does not inspect credential files or start an agent turn, but CLI launch can have normal internal side effects. Choose only an official Codex executable you trust."
+        panel.message = "Whoosh starts your selected Codex CLI with its own ordinary configuration and account, and reads the local histories it exposes. Whoosh does not inspect credential files or start an agent turn, but CLI launch can have normal internal side effects. Choose only an official Codex executable you trust."
         panel.canChooseDirectories = false
         panel.canChooseFiles = true
         panel.allowsMultipleSelection = false

@@ -9,7 +9,7 @@ public enum RelayError: LocalizedError, Equatable {
     public var errorDescription: String? {
         switch self {
         case .invalidInput(let reason), .processFailed(let reason): return reason
-        case .promptTooLong(let count): return "The bootstrap is \(count) UTF-16 units. Shorten the checkpoint to keep it below 12,000; Blink never silently truncates it."
+        case .promptTooLong(let count): return "The bootstrap is \(count) UTF-16 units. Shorten the checkpoint to keep it below 12,000; Whoosh never silently truncates it."
         case .archiveMismatch: return "The saved transcript did not match the original bytes. No handoff was opened."
         }
     }

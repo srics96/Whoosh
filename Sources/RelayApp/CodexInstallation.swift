@@ -28,7 +28,7 @@ enum CodexInstallation {
             URL(fileURLWithPath: "/opt/homebrew/bin/codex"),
             URL(fileURLWithPath: "/usr/local/bin/codex"),
         ]
-        // The Codex / ChatGPT desktop app bundles the signed codex CLI, so Blink can read Codex
+        // The Codex / ChatGPT desktop app bundles the signed codex CLI, so Whoosh can read Codex
         // sources wherever that app is installed without any separate CLI install. Located, not executed.
         if let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.openai.codex") {
             candidates.append(app.appendingPathComponent("Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex"))

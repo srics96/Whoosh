@@ -261,7 +261,7 @@ private enum CodexCLIProbe {
         let versionBytes = try await CodexProbeCommand.run(executable: executable, arguments: ["--version"])
         let version = String(decoding: versionBytes, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
         guard version.range(of: #"^codex(?:-cli)? [0-9]+\.[0-9]+\.[0-9]+"#, options: .regularExpression) != nil else { throw CodexSourceError.unsupportedCLI }
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("Blink-Codex-Probe-\(UUID().uuidString)", isDirectory: true)
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("Whoosh-Codex-Probe-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
         defer { try? FileManager.default.removeItem(at: directory) }
         _ = try await CodexProbeCommand.run(executable: executable, arguments: ["app-server", "generate-json-schema", "--out", directory.path])

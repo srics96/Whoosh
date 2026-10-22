@@ -20,7 +20,7 @@ public actor CodexNativeSourceProvider {
             let version = try await transport.connect(executableURL: executableURL)
             try checkGeneration(session)
             let response = try await transport.request(.initialize, params: [
-                "clientInfo": .object(["name": .string("blink_handoff"), "title": .string("Blink"), "version": .string("0.1.0")]),
+                "clientInfo": .object(["name": .string("whoosh_handoff"), "title": .string("Whoosh"), "version": .string("0.1.0")]),
                 "capabilities": .object(["experimentalApi": .bool(false)])
             ])
             try checkGeneration(session)

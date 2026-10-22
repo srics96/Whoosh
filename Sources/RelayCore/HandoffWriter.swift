@@ -12,7 +12,7 @@ public enum HandoffWriter {
                 throw RelayError.invalidInput("Choose an existing local project folder and output folder.")
             }
         }
-        let name = "Blink-" + ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
+        let name = "Whoosh-" + ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
             + "-" + String(UUID().uuidString.prefix(8))
         let directory = outputParent.appendingPathComponent(name, isDirectory: true)
         let relativeArchive = "transcript/original." + URL(fileURLWithPath: conversation.fileName).pathExtension.lowercased()
@@ -137,7 +137,7 @@ public enum HandoffWriter {
 
     private static func checkpointText(_ checkpoint: Checkpoint, git: GitSnapshot) -> String {
         """
-        # Blink checkpoint
+        # Whoosh checkpoint
 
         Source: \(checkpoint.sourceName)
         Source stopped: user-confirmed, not process-verified.
@@ -169,7 +169,7 @@ public enum HandoffWriter {
     }
 
     private static let readme = """
-    This package was created locally by the Blink prototype.
+    This package was created locally by the Whoosh prototype.
     original.* contains the exact selected export bytes or selected source API response bytes.
     manifest.json records the preservation scope, lengths, SHA-256 and read-only Git snapshot.
     The archive is not a native chat database import. Attachments, hidden reasoning, permissions,
@@ -184,6 +184,6 @@ public enum HandoffWriter {
     Open the destination app and provide bootstrap.txt manually after review.
     App opening is not proof the destination read these files.
     Files have owner-only POSIX modes, but a chosen synced/shared parent may have separate
-    cloud sharing or ACL behavior. Blink cannot prove that the selected output is private.
+    cloud sharing or ACL behavior. Whoosh cannot prove that the selected output is private.
     """
 }

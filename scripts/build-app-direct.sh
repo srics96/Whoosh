@@ -6,14 +6,14 @@
 # PackageDescription.swiftinterface (an "Invalid manifest / Undefined symbols:
 # PackageDescription.Package.__allocating_init" link error). The application
 # sources themselves compile fine with swiftc; only SwiftPM's manifest runner is
-# broken, so this compiles the two targets directly and assembles dist/Blink.app.
+# broken, so this compiles the two targets directly and assembles dist/Whoosh.app.
 #
 # It produces the same bundle layout as scripts/build-app.sh and ad-hoc signs it
 # for local testing. It does not install, launch, upload or notarize anything.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 if [[ "$(uname -s)" != Darwin ]]; then
-  printf '%s\n' 'Blink is a macOS app. Build on macOS 13+ with the Xcode Command Line Tools.' >&2
+  printf '%s\n' 'Whoosh is a macOS app. Build on macOS 13+ with the Xcode Command Line Tools.' >&2
   exit 1
 fi
 
@@ -32,21 +32,21 @@ xcrun swiftc -O -wmo -parse-as-library \
   -emit-library -static -o "$B/libRelayCore.a" \
   $CORE_SOURCES
 
-echo "Compiling Blink (RelayApp)…"
+echo "Compiling Whoosh (RelayApp)…"
 # shellcheck disable=SC2086
 xcrun swiftc -O -wmo \
-  -module-name Blink \
+  -module-name Whoosh \
   -I "$B" \
-  -o "$B/Blink" \
+  -o "$B/Whoosh" \
   $APP_SOURCES \
   "$B/libRelayCore.a"
 
-APP="$PWD/dist/Blink.app"
+APP="$PWD/dist/Whoosh.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp "$B/Blink" "$APP/Contents/MacOS/Blink"
+cp "$B/Whoosh" "$APP/Contents/MacOS/Whoosh"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
-cp Resources/Blink.icns "$APP/Contents/Resources/Blink.icns"
+cp Resources/Whoosh.icns "$APP/Contents/Resources/Whoosh.icns"
 cp -R Resources/ClaudeAdapter "$APP/Contents/Resources/"
 
 # Wire up the "From Claude Code" source if its SDK has been installed into the
@@ -69,7 +69,7 @@ else
   printf 'Claude Code source: SDK not installed; Claude source disabled (Codex source still works).\n'
 fi
 
-chmod +x "$APP/Contents/MacOS/Blink"
+chmod +x "$APP/Contents/MacOS/Whoosh"
 
 # Ad-hoc signing is local-only. No identity, upload, installer or notarization is used.
 codesign --force --sign - "$APP"
