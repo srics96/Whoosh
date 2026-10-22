@@ -1,12 +1,12 @@
 #!/bin/bash
-# Package a self-contained, distributable Blink.dmg for Apple Silicon.
+# Package a self-contained, distributable Whoosh.dmg for Apple Silicon.
 #
 # The resulting app carries its own Node runtime and the read-only Claude Agent
 # SDK, so it has NO dependency on the build machine's Homebrew/Node/toolchain.
 # It is ad-hoc signed (no Apple Developer ID), so the first launch on another Mac
 # needs a one-time System Settings -> Privacy & Security -> "Open Anyway".
 #
-# Blink still requires the Claude and/or Codex apps (and the Codex CLI for the
+# Whoosh still requires the Claude and/or Codex apps (and the Codex CLI for the
 # Codex source) to be installed on the destination Mac — it moves chats between
 # them; it cannot replace them.
 #
@@ -37,7 +37,7 @@ fi
 # 3. Build the app bundle (copies Resources/ClaudeAdapter, including node_modules).
 bash scripts/build-app-direct.sh
 
-APP="dist/Blink.app"
+APP="dist/Whoosh.app"
 ADAPTER="$APP/Contents/Resources/ClaudeAdapter"
 
 # 4. Prune the SDK's native `claude` CLI (~266 MB). The adapter is read-only and
@@ -65,28 +65,28 @@ codesign --verify --deep --strict "$APP" && echo "signature: ok"
 # 7. Assemble the DMG (app + Applications shortcut + install notes).
 STAGING="$CACHE/dmg-staging"
 rm -rf "$STAGING"; mkdir -p "$STAGING"
-cp -R "$APP" "$STAGING/Blink.app"
+cp -R "$APP" "$STAGING/Whoosh.app"
 ln -s /Applications "$STAGING/Applications"
 cat > "$STAGING/INSTALL — read me.txt" <<'TXT'
-Blink — install
+Whoosh — install
 
-1. Drag Blink into the Applications folder (shown here).
-2. Open Applications and double-click Blink. macOS will say it "cannot be
+1. Drag Whoosh into the Applications folder (shown here).
+2. Open Applications and double-click Whoosh. macOS will say it "cannot be
    opened because Apple cannot check it for malicious software."
 3. Open  > System Settings > Privacy & Security, scroll down, and click
-   "Open Anyway" next to Blink. Confirm. (One time only.)
-4. Blink lives in the menu bar (top-right). Press Cmd-Shift-Space to open it.
+   "Open Anyway" next to Whoosh. Confirm. (One time only.)
+4. Whoosh lives in the menu bar (top-right). Press Cmd-Shift-Space to open it.
 
-Blink moves a conversation between Claude and Codex. Those apps (and the Codex
+Whoosh moves a conversation between Claude and Codex. Those apps (and the Codex
 CLI for the Codex side) must be installed on this Mac for it to have anything
-to read from or open into. Blink never sends anything automatically — it opens
+to read from or open into. Whoosh never sends anything automatically — it opens
 a pre-filled draft for you to review and press Send.
 TXT
 
-rm -f dist/Blink.dmg
-hdiutil create -volname "Blink" -srcfolder "$STAGING" -ov -format UDZO -quiet dist/Blink.dmg
-xattr -c dist/Blink.dmg 2>/dev/null || true
+rm -f dist/Whoosh.dmg
+hdiutil create -volname "Whoosh" -srcfolder "$STAGING" -ov -format UDZO -quiet dist/Whoosh.dmg
+xattr -c dist/Whoosh.dmg 2>/dev/null || true
 
-SIZE=$(du -h dist/Blink.dmg | cut -f1)
-printf '\nBuilt distributable DMG: %s (%s)\n' "$PWD/dist/Blink.dmg" "$SIZE"
+SIZE=$(du -h dist/Whoosh.dmg | cut -f1)
+printf '\nBuilt distributable DMG: %s (%s)\n' "$PWD/dist/Whoosh.dmg" "$SIZE"
 printf '%s\n' 'Ad-hoc signed; first launch on another Mac needs "Open Anyway" (see INSTALL note in the DMG).'

@@ -6,6 +6,7 @@ dist/
 
 # Private runtime handoff archives never belong in the public source tree.
 Blink-*/
+Whoosh-*/
 Relay-*/
 
 # Local builds and installed dependencies

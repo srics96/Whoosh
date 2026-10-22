@@ -12,7 +12,7 @@ struct RelayOverlay: View {
     @State private var showOptions = false
     @FocusState private var searchFocused: Bool
 
-    private var reduced: Bool { systemReduceMotion || model.reduceMotionInBlink }
+    private var reduced: Bool { systemReduceMotion || model.reduceMotionInWhoosh }
     private var rows: [RelayModel.NativeThread] { model.visibleNativeThreads }
     private var flying: Bool { model.isBusy || model.stage == .complete || model.stage == .review }
 
@@ -58,7 +58,7 @@ struct RelayOverlay: View {
 
     private var header: some View {
         HStack(spacing: 12) {
-            BlinkMark(active: flying).frame(width: 22, height: 20)
+            WhooshMark(active: flying).frame(width: 22, height: 20)
             directionPill
             Spacer()
             Menu {
@@ -67,8 +67,8 @@ struct RelayOverlay: View {
                 Divider()
                 Button("Import a conversation export…") { model.importConversation() }
                 Button("Locate Codex helper…") { model.connectNativeCodex() }
-                Toggle("Reduce motion", isOn: $model.reduceMotionInBlink)
-                Toggle("Include Blink test chats", isOn: $model.includeOwnedTestChats)
+                Toggle("Reduce motion", isOn: $model.reduceMotionInWhoosh)
+                Toggle("Include Whoosh test chats", isOn: $model.includeOwnedTestChats)
             } label: {
                 Image(systemName: "slider.horizontal.3").font(.system(size: 13, weight: .semibold))
                     .frame(width: 30, height: 30)
@@ -194,7 +194,7 @@ struct RelayOverlay: View {
     private var flight: some View {
         VStack(spacing: 22) {
             ZStack {
-                MagicTrail(active: model.stage != .complete && model.stage != .review, forceReduceMotion: reduced)
+                WhooshTrail(active: model.stage != .complete && model.stage != .review, forceReduceMotion: reduced)
                     .frame(height: 96)
                 HStack {
                     providerIcon(model.source, 42)
@@ -231,7 +231,7 @@ struct RelayOverlay: View {
     }
     private var flightSubtitle: String {
         switch model.stage {
-        case .complete: return "Your context is in the new \(model.destination.displayName) composer. Review it and press Send — Blink never submits for you."
+        case .complete: return "Your context is in the new \(model.destination.displayName) composer. Review it and press Send — Whoosh never submits for you."
         case .review: return model.errorMessage ?? "The handoff was prepared but the destination didn’t open."
         default: return "Preserving the conversation and preparing a draft. This takes a moment."
         }
@@ -276,7 +276,7 @@ struct RelayOverlay: View {
 
     private func providerIcon(_ app: RelayModel.AgentApp, _ size: CGFloat) -> some View {
         Group {
-            if let image = BlinkIdentity.providerIcon(app) {
+            if let image = WhooshIdentity.providerIcon(app) {
                 Image(nsImage: image).resizable().aspectRatio(contentMode: .fit)
             } else {
                 Image(systemName: app == .codex ? "terminal" : "sparkle")

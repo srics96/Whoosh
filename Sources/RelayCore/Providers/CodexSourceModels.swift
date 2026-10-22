@@ -8,13 +8,13 @@ public enum CodexSourceError: LocalizedError, Sendable {
 
     public var errorDescription: String? {
         switch self {
-        case .consentRequired: return "Choose Connect before Blink starts the selected Codex CLI."
+        case .consentRequired: return "Choose Connect before Whoosh starts the selected Codex CLI."
         case .notConnected: return "Connect the Codex source first."
         case .notListed: return "Choose a conversation from the current Codex source list."
         case .invalidExecutable: return "Select a trusted, installed Codex CLI executable."
         case .unsupportedCLI: return "This Codex CLI does not advertise the required database-only thread listing. Update Codex, or use an explicit conversation export."
-        case .responseTooLarge: return "The source response exceeded Blink's size limit. Request fewer items or use an explicit export."
-        case .timedOut: return "The Codex source did not respond in time. Blink closed its own connection."
+        case .responseTooLarge: return "The source response exceeded Whoosh's size limit. Request fewer items or use an explicit export."
+        case .timedOut: return "The Codex source did not respond in time. Whoosh closed its own connection."
         case .disconnected: return "The Codex source connection closed."
         case .invalidResponse(let detail): return "Unsupported Codex response: \(detail)"
         case .remote(let code, let message): return "Codex source error \(code): \(String(message.prefix(300)))"

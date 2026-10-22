@@ -94,7 +94,7 @@ class PortableContracts(unittest.TestCase):
     def test_app_bundle_metadata(self):
         with (ROOT / "Resources/Info.plist").open("rb") as stream:
             info = plistlib.load(stream)
-        self.assertEqual(info["CFBundleExecutable"], "Blink")
+        self.assertEqual(info["CFBundleExecutable"], "Whoosh")
         self.assertEqual(info["LSMinimumSystemVersion"], "13.0")
 
     def test_shell_script_syntax(self):

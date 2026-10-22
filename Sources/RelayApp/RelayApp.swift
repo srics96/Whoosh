@@ -33,7 +33,7 @@ final class RelayAppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
-        NSApp.applicationIconImage = BlinkIdentity.icon(size: 256)
+        NSApp.applicationIconImage = WhooshIdentity.icon(size: 256)
         configureApplicationMenu()
         hotKey.onPress = { [weak self] in
             self?.model.shortcutActivationCount += 1
@@ -47,11 +47,11 @@ final class RelayAppDelegate: NSObject, NSApplicationDelegate {
             model.shortcutLabel = saved.label
         } else {
             model.shortcutLabel = "Menu bar"
-            model.shortcutNotice = "That shortcut is in use. Open Blink from the menu bar and choose another shortcut."
+            model.shortcutNotice = "That shortcut is in use. Open Whoosh from the menu bar and choose another shortcut."
         }
         model.shortcutDiagnostic = hotKey.diagnostic
         updateShortcutChecks()
-        FileHandle.standardError.write(Data("Blink: global hotkey \(model.shortcutLabel) registered=\(hotKey.selected != nil) [\(hotKey.diagnostic)]\n".utf8))
+        FileHandle.standardError.write(Data("Whoosh: global hotkey \(model.shortcutLabel) registered=\(hotKey.selected != nil) [\(hotKey.diagnostic)]\n".utf8))
         showOverlay()
     }
 
@@ -74,9 +74,9 @@ final class RelayAppDelegate: NSObject, NSApplicationDelegate {
 
     private func configureStatusItem() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        item.button?.image = BlinkIdentity.icon(size: 20, template: true)
+        item.button?.image = WhooshIdentity.icon(size: 20, template: true)
         let menu = NSMenu()
-        let show = NSMenuItem(title: "Open Blink", action: #selector(showOverlay), keyEquivalent: "")
+        let show = NSMenuItem(title: "Open Whoosh", action: #selector(showOverlay), keyEquivalent: "")
         show.target = self
         menu.addItem(show)
         menu.addItem(.separator())
@@ -92,7 +92,7 @@ final class RelayAppDelegate: NSObject, NSApplicationDelegate {
         shortcutMenu.submenu = shortcuts
         menu.addItem(shortcutMenu)
         menu.addItem(.separator())
-        let quit = NSMenuItem(title: "Quit Blink", action: #selector(quitRelay), keyEquivalent: "q")
+        let quit = NSMenuItem(title: "Quit Whoosh", action: #selector(quitRelay), keyEquivalent: "q")
         quit.target = self
         menu.addItem(quit)
         item.menu = menu
@@ -103,8 +103,8 @@ final class RelayAppDelegate: NSObject, NSApplicationDelegate {
         // Preserve standard text editing shortcuts without creating an empty Settings scene.
         let main = NSMenu()
         let applicationItem = NSMenuItem()
-        let applicationMenu = NSMenu(title: "Blink")
-        let quit = NSMenuItem(title: "Quit Blink", action: #selector(quitRelay), keyEquivalent: "q")
+        let applicationMenu = NSMenu(title: "Whoosh")
+        let quit = NSMenuItem(title: "Quit Whoosh", action: #selector(quitRelay), keyEquivalent: "q")
         quit.target = self
         applicationMenu.addItem(quit)
         applicationItem.submenu = applicationMenu
@@ -134,7 +134,7 @@ final class RelayAppDelegate: NSObject, NSApplicationDelegate {
                 model.shortcutNotice = "\(shortcut.label) is unavailable. The previous shortcut was restored."
             } else {
                 model.shortcutLabel = "Menu bar"
-                model.shortcutNotice = "The shortcut is unavailable. Open Blink from the menu bar and choose another shortcut."
+                model.shortcutNotice = "The shortcut is unavailable. Open Whoosh from the menu bar and choose another shortcut."
             }
             showOverlay()
         }
@@ -151,7 +151,7 @@ final class RelayAppDelegate: NSObject, NSApplicationDelegate {
     @objc func showOverlay() {
         // A fresh hotkey press always starts a new handoff, never the previous one's result screen.
         if model.stage == .complete || model.stage == .review { model.startAgain() }
-        // Capture foreground context BEFORE Blink becomes active. It suggests a source app, never a thread.
+        // Capture foreground context BEFORE Whoosh becomes active. It suggests a source app, never a thread.
         model.suggestSource(from: NSWorkspace.shared.frontmostApplication)
         model.restoreConnectionIfApproved()
         if panel == nil { panel = makePanel() }

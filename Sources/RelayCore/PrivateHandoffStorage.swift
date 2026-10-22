@@ -8,7 +8,7 @@ public enum PrivateHandoffStorage {
         while ancestor.path != "/" {
             if let attrs = try? fm.attributesOfItem(atPath: ancestor.path),
                attrs[.type] as? FileAttributeType == .typeSymbolicLink {
-                throw RelayError.invalidInput("Blink storage is redirected by a symbolic link. Choose a private local location before continuing.")
+                throw RelayError.invalidInput("Whoosh storage is redirected by a symbolic link. Choose a private local location before continuing.")
             }
             ancestor.deleteLastPathComponent()
         }
