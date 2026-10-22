@@ -7,8 +7,8 @@ var targets: [Target] = [
     .testTarget(name: "RelayCoreTests", dependencies: ["RelayCore"])
 ]
 #if os(macOS)
-products.append(.executable(name: "Blink", targets: ["RelayApp"]))
+products.append(.executable(name: "Whoosh", targets: ["RelayApp"]))
 targets.append(.executableTarget(name: "RelayApp", dependencies: ["RelayCore"]))
 #endif
 
-let package = Package(name: "Blink", platforms: [.macOS(.v13)], products: products, targets: targets)
+let package = Package(name: "Whoosh", platforms: [.macOS(.v13)], products: products, targets: targets)

@@ -4,7 +4,7 @@ import XCTest
 final class CodexTransportTests: XCTestCase {
     /// The only executable launched is this test-authored fixture. It never accesses native user state.
     func testSmallPersistentReplyAndFinalReplyBeforeEOF() async throws {
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("Blink-Synthetic-Transport-\(UUID().uuidString)", isDirectory: true)
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("Whoosh-Synthetic-Transport-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
         defer { try? FileManager.default.removeItem(at: directory) }
         let executable = directory.appendingPathComponent("synthetic-codex")

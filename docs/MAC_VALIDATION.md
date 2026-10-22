@@ -1,49 +1,73 @@
 # Mac validation gate
 
-These checks are not marked passed by source inspection or Linux contract tests.
+These checks need a real Mac; they are not satisfied by source inspection or the
+portable contract tests. Use synthetic fixtures until you deliberately choose a
+real conversation.
 
 ## Compile and package
 
-- Confirm the selected executor is macOS and Swift 5.9+ is already available.
-- Run `swift test`, `swift build`, and `bash scripts/build-app.sh`.
-- Confirm `codesign --verify --deep --strict dist/Blink.app` succeeds.
-- Do not install software, enable accessibility permissions, sign in, or grant persistent access merely to make a test pass.
+- Confirm macOS 13+ and the Xcode Command Line Tools (Swift 5.9+) are present.
+- Build: `swift build`, or `bash scripts/build-app-direct.sh` if `swift build`
+  fails at the manifest step (see the README note on `libPackageDescription`).
+- Confirm `codesign --verify --deep --strict dist/Whoosh.app` succeeds.
+- For the distributable: `bash scripts/package-dmg.sh`, then confirm the app in
+  the DMG runs with **no external Node** (the bundle carries its own).
+- Do not install software, enable Accessibility, sign in, or grant persistent
+  access merely to make a test pass.
 
-## Synthetic end-to-end flow
+## The whoosh (synthetic end-to-end)
 
-- Launch the built app. Confirm a menu-bar icon, visible handoff window, and an accessible window title.
-- Test both configured hotkey choices. Confirm registration failures/conflicts are visible. Quit and verify the shortcut is released.
-- Open the overlay while another app is foreground. It may suggest the app; it must not say it knows the selected thread.
-- Import `fixtures/synthetic-conversation.md`. Pick a synthetic project directory and an explicit temporary output directory.
-- Enter a goal and next step; leave optional notes empty once, then provide them.
-- Verify the source-stopped requirement and the separate data-transfer review requirement. No file chooser or app launch should run before the corresponding user action.
-- Prepare a handoff and verify byte-for-byte archive equality, manifest byte count/hash, file modes, and an untouched synthetic project.
-- Review the exact bootstrap and all path/privacy disclosures. The raw transcript must not be automatically submitted or put wholesale into the URL.
-- Edit any input after preparation. Confirm the old launch action and approvals become invalid.
-- Repeat prepare, Back/Cancel, and repeated-click flows. Every package has a distinct directory. Cancelled panels retain the existing valid selection or clearly leave it unchanged.
-- Use a malformed/empty/over-limit source and a long checkpoint. Confirm useful errors and no partial package is left behind.
+- Launch the app. Confirm the menu-bar comet icon and that **⌘⇧Space** opens the
+  Spotlight panel. Confirm a shortcut conflict is shown as an error, and the
+  shortcut is released on quit.
+- Open the panel from different foreground apps. The direction may be suggested
+  from the foreground app; it must never claim to know the selected thread.
+- Type to filter, **↑/↓** to move, **⇥** to swap, **Return** to send. Confirm the
+  highlighted row is the one that flies.
+- After a handoff completes, press the hotkey again: it must return to a fresh
+  picker, not the previous completion screen.
+- Inspect the generated folder under `~/Library/Application Support/Whoosh/Handoffs/`:
+  `BRIEF.md` (goal + latest request + recent exchange), `context/` (copied
+  convention files when present), `transcript/original.*` (byte-for-byte, matching
+  manifest byte count + SHA-256), `0700`/`0600` modes, and an untouched project.
+- Confirm `bootstrap.txt` stays small and points at the files; the full transcript
+  is never put wholesale into the URL, and nothing is submitted automatically.
+- Try a very long conversation; confirm it captures within the budget rather than
+  failing at the old 32 MiB limit.
 
 ## Destination behavior
 
-- If Claude is absent, confirm a clear missing-app state; no fabricated success, automatic install, or web fallback.
-- If Claude is installed and a synthetic test launch is authorized, review and open the link. Confirm Claude Code opens, asks for the project folder, and prefills the exact short prompt without submitting it.
-- The app must label completion as destination opened/prompt prefilled, not history imported/read/verified.
-- For Codex, confirm the manual/open-app fallback is clearly labeled. Do not imply a native thread was created or its context prefilled unless independently demonstrated.
-- Test a project path and output path containing spaces, plus signs, ampersands, `#`, and Unicode.
-- Test reduced motion and VoiceOver labels; all important states must be visible without animation.
+- If the destination app is absent, confirm a clear missing-app state — no
+  fabricated success, auto-install, or web fallback.
+- With the app installed and a synthetic launch authorized: confirm the composer
+  opens with the prefilled bootstrap, asks for the project folder as the provider
+  requires, and does **not** submit.
+- Completion must read as "opened / prefilled", never "history imported/read/verified".
+- Test project/output paths containing spaces, `+`, `&`, `#`, and Unicode.
+- Test Reduce Motion and VoiceOver: all important states must be legible without
+  the animation.
 
-## Optional native Codex source
+## Codex source (CLI + bundled-in-app)
 
-The user must explicitly choose an official installed Codex CLI and approve connecting. Do not inspect private native database files, scan session directories, read auth files, or automatically choose an arbitrary executable from PATH.
+- Confirm detection finds a signed Codex CLI — including the copy inside the
+  Codex/ChatGPT app — and that an unsigned/mismatched binary fails closed.
+- Verify the version/schema probe is bounded and an unsupported CLI fails closed.
+- Confirm the picker only shows threads from the connected CLI, selected history
+  has exact raw API bytes with partial/pagination markers, and unknown IDs,
+  malformed results, server-requested actions, and bad pagination are rejected.
+- Disconnect mid-request, then reconnect: stale results must not replace a new
+  selection, and owned child processes must exit.
 
-- Verify CLI version/schema probe has a bounded timeout and unsupported CLI fails closed.
-- Verify safe-list capability is required before thread/list.
-- Confirm the thread picker only contains responses from the selected CLI connection. Native desktop thread visibility is not guaranteed.
-- Confirm selected history has exact raw API response bytes, correct selected ID, and explicit partial/pagination markers.
-- Reject unknown IDs, malformed results, server-requested actions, and unsupported pagination without resuming/starting a thread.
-- Disconnect during a request and repeat Connect. Confirm stale results do not replace a new selection and owned child processes exit.
-- Live usage may be unavailable. No fake bar, reset time, or quota should be shown.
+## Claude Code source (bundled Node + SDK)
+
+- With `Resources/ClaudeAdapter` populated (`npm install`) and `runtime.json`
+  wired, confirm the adapter lists and reads local sessions read-only, and that
+  it works under a restricted `PATH` using the bundled Node.
+- Confirm Chat/Cowork are not claimed, and that a changed source during read is
+  rejected rather than silently captured.
 
 ## Record evidence
 
-Record command output, toolchain/macOS versions, synthetic scenario results, and screenshots of compose/review/completion. Never include private exported conversations or account information in the public repository or screenshots.
+Record command output, toolchain/macOS versions, synthetic results, and
+screenshots of the picker / whoosh / completion. Never include private exported
+conversations or account information in the repository or screenshots.
