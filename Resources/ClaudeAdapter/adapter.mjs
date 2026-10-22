@@ -17,17 +17,37 @@ export async function handle(sdk, request) {
   if (dir && (!before.cwd || resolve(dir).normalize('NFC') !== resolve(before.cwd).normalize('NFC'))) throw Error('Project mismatch');
   if(request.action==='info') return {info:before};
   if(request.action!=='read') throw Error('Unsupported operation');
-  const messages=[]; const seen=new Set(); let exhausted=false;
-  for(let offset=0;offset<10000;offset+=100) {
+  const messages=[]; const seen=new Set(); let exhausted=false; let approxBytes=0;
+  const captureCap=240*1024*1024;
+  for(let offset=0;offset<200000;offset+=100) {
     const page=await sdk.getSessionMessages(request.id,{dir,limit:100,offset,includeSystemMessages:true});
-    for(const message of page) { if(seen.has(message.uuid)) throw Error('Unstable pagination'); seen.add(message.uuid); messages.push(message); }
-    if(Buffer.byteLength(JSON.stringify(messages))>32*1024*1024) throw Error('History exceeds safe capture size');
+    for(const message of page) {
+      if(seen.has(message.uuid)) throw Error('Unstable pagination');
+      seen.add(message.uuid);
+      approxBytes+=Buffer.byteLength(JSON.stringify(message))+1; // incremental; avoids O(n^2) restringify on long transcripts
+      if(approxBytes>captureCap) throw Error('History exceeds safe capture size');
+      messages.push(message);
+    }
     if(page.length<100) {exhausted=true;break;}
   }
   const after=await sdk.getSessionInfo(request.id,{dir});
   if(!after || after.sessionId!==request.id || before.cwd!==after.cwd || before.lastModified!==after.lastModified || before.fileSize!==after.fileSize) throw Error('Source changed; stop it and select again');
   if(messages.length===0) throw Error('No readable messages');
-  return {info:after, archive:JSON.stringify({provider:'claude-agent-sdk',version:'0.3.306',session:after,messages,apiChainExhausted:exhausted,notice})+'\n', partial:true, notice:notice+(exhausted?' All API chain pages captured.':' Capture stopped at 10000 messages; more may exist.')};
+  // A compact role+text digest so the destination can resume from intent, not re-read everything.
+  const norm = m => {
+    const role = m.role || (m.message && m.message.role) || m.type || 'assistant';
+    const content = (m.message && m.message.content) ?? m.content ?? m.text;
+    let text = '';
+    if (typeof content === 'string') text = content;
+    else if (Array.isArray(content)) text = content.filter(b=>b && typeof b.text==='string' && (b.type===undefined||b.type==='text')).map(b=>b.text).join('\n');
+    return { role: role==='user'?'user':'assistant', text: (text||'').trim().slice(0, 2000) };
+  };
+  const normalized = messages.map(norm).filter(x=>x.text);
+  const firstUser = normalized.find(x=>x.role==='user');
+  const digest = [];
+  if (firstUser) digest.push(firstUser);
+  for (const x of normalized.slice(-6)) if (x!==firstUser) digest.push(x);
+  return {info:after, archive:JSON.stringify({provider:'claude-agent-sdk',version:'0.3.306',session:after,messages,apiChainExhausted:exhausted,notice})+'\n', partial:true, notice:notice+(exhausted?' All API chain pages captured.':' Capture stopped at 200000 messages; more may exist.'), digest};
 }
 if (process.argv[1] && import.meta.url===pathToFileURL(process.argv[1]).href) {
   try {

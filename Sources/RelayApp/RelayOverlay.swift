@@ -2,257 +2,328 @@ import SwiftUI
 import AppKit
 import RelayCore
 
+/// Spotlight-style handoff surface: one screen, keyboard-first, built to feel instant.
+/// Open with the hotkey, type to filter, press Return to send the chat to the other app.
 @MainActor
 struct RelayOverlay: View {
     @ObservedObject var model: RelayModel
     let close: () -> Void
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
-    @State private var options = false
-    @State private var details = false
-    @State private var demo = UserDefaults.standard.bool(forKey: "blinkDesignPreview")
-    @State private var demoSelected: RelayModel.NativeThread?
-    @State private var demoStage: RelayModel.Stage = .compose
-    @State private var demoStopped = false
+    @State private var showOptions = false
     @FocusState private var searchFocused: Bool
-    private var reduced: Bool { systemReduceMotion || model.reduceMotionInBlink }
-    private var stage: RelayModel.Stage { demo ? demoStage : model.stage }
-    private var selected: RelayModel.NativeThread? {
-        demo ? demoSelected : model.selectingThread ?? model.nativeThreads.first { $0.id == model.nativeSelectedID }
-    }
-    private var hasSelection: Bool { selected != nil || (!demo && model.conversation != nil) }
-    private var departing: Bool { stage == .departing || stage == .opening }
-    private var busy: Bool { demo ? [.preparing,.departing,.opening].contains(demoStage) : model.isBusy }
-    private var rows: [RelayModel.NativeThread] {
-        demo ? [
-            .init(id:"preview-a",title:"Polaris — finish the settings experience",preview:"Keyboard navigation is ready. Review the empty state and the final button labels next.",directory:"/preview/Polaris",updatedAt:Date().addingTimeInterval(-180)),
-            .init(id:"preview-b",title:"A calmer onboarding flow for first-time users",preview:"The welcome screen is simplified. Keep the account connection optional until it is needed.",directory:"/preview/Orbit",updatedAt:Date().addingTimeInterval(-4200)),
-            .init(id:"preview-c",title:"Review search results and keyboard shortcuts",preview:"Search now groups results by project. The remaining work is the focus order.",directory:"/preview/Atlas",updatedAt:Date().addingTimeInterval(-86400))
-        ] : model.visibleNativeThreads
-    }
+
+    private var reduced: Bool { systemReduceMotion || model.reduceMotionInWhoosh }
+    private var rows: [RelayModel.NativeThread] { model.visibleNativeThreads }
+    private var flying: Bool { model.isBusy || model.stage == .complete || model.stage == .review }
 
     var body: some View {
-        VStack(spacing:0) {
-            toolbar
-            Divider()
-            if demo { Text("DESIGN PREVIEW · SYNTHETIC CONTENT · NO APP WILL OPEN").font(.system(size:10,weight:.semibold)).foregroundStyle(.secondary).padding(.top,10) }
-            ScrollView {
-                VStack(alignment:.leading,spacing:20) {
-                    if let error=model.errorMessage, !demo { message(error,warning:true) }
-                    if stage == .complete { completion }
-                    else if hasSelection { selection }
-                    else { picker }
-                }.padding(20)
+        ZStack {
+            background
+            VStack(spacing: 0) {
+                header
+                if flying {
+                    flight
+                        .transition(.opacity)
+                } else {
+                    searchBar
+                    Divider().overlay(Color.white.opacity(0.08))
+                    content
+                }
+                hintBar
             }
-            footer
         }
-        .background(Color(nsColor:.windowBackgroundColor))
-        .frame(width:580)
-        .font(.system(size:14))
-        .popover(isPresented:$options,arrowEdge:.top) { optionPanel }
-        .onChange(of:model.source) { _ in searchFocused=true }
+        .frame(width: 680)
+        .fixedSize(horizontal: false, vertical: true)
+        .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(Color.white.opacity(0.12), lineWidth: 1))
+        .foregroundStyle(.white)
+        .tint(Color(red: 1, green: 0.68, blue: 0.5))
+        .animation(reduced ? nil : .easeInOut(duration: 0.22), value: flying)
+        .onAppear { searchFocused = true; model.ensureHighlight() }
+        .onChange(of: model.source) { _ in searchFocused = true }
+        .onChange(of: model.nativeSearch) { _ in model.ensureHighlight() }
+        .onChange(of: model.nativeThreads.count) { _ in model.ensureHighlight() }
     }
 
-    private var toolbar: some View {
-        HStack(spacing:12) {
-            BlinkMark().frame(width:22,height:20)
-            Text("Blink").font(.system(size:14,weight:.semibold))
-            Menu {
-                ForEach(RelayModel.AgentApp.allCases) { app in Button("From " + app.displayName) { model.chooseSource(app) } }
-            } label: {
-                HStack(spacing:7) { icon(model.source,20); Text("From " + model.source.displayName); Image(systemName:"chevron.down").font(.system(size:9,weight:.bold)) }
-                    .font(.system(size:12,weight:.medium)).padding(.horizontal,10).padding(.vertical,8)
-                    .background(.primary.opacity(0.05),in:RoundedRectangle(cornerRadius:9))
-            }.menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().disabled(busy || demo)
+    // MARK: Chrome
+
+    private var background: some View {
+        ZStack {
+            Rectangle().fill(.ultraThinMaterial)
+            LinearGradient(colors: [Color(red: 0.07, green: 0.08, blue: 0.12).opacity(0.86),
+                                    Color(red: 0.04, green: 0.04, blue: 0.07).opacity(0.94)],
+                           startPoint: .top, endPoint: .bottom)
+        }
+    }
+
+    private var header: some View {
+        HStack(spacing: 12) {
+            WhooshMark(active: flying).frame(width: 22, height: 20)
+            directionPill
             Spacer()
-            Button { options.toggle() } label: { Image(systemName:"ellipsis").frame(width:32,height:32) }.buttonStyle(.plain).accessibilityLabel("Options")
-            Button(action:close) {
-                HStack(spacing:7) { Image(systemName:"xmark").font(.system(size:12,weight:.semibold)); Text("Close"); Text("esc").font(.system(size:10,design:.monospaced)).foregroundStyle(.secondary) }
-                    .font(.system(size:12,weight:.medium)).padding(.horizontal,12).frame(height:36)
-                    .background(.primary.opacity(0.06),in:RoundedRectangle(cornerRadius:9))
-            }.buttonStyle(.plain).keyboardShortcut(.cancelAction).accessibilityLabel("Close Blink. Escape also closes.")
-        }.padding(.horizontal,20).padding(.vertical,14)
+            Menu {
+                Button("Switch direction") { model.swapApps() }.disabled(flying)
+                if model.nativeConnected { Button("Disconnect " + model.source.displayName) { model.disconnectNativeCodex() }.disabled(flying) }
+                Divider()
+                Button("Import a conversation export…") { model.importConversation() }
+                Button("Locate Codex helper…") { model.connectNativeCodex() }
+                Toggle("Reduce motion", isOn: $model.reduceMotionInWhoosh)
+                Toggle("Include Whoosh test chats", isOn: $model.includeOwnedTestChats)
+            } label: {
+                Image(systemName: "slider.horizontal.3").font(.system(size: 13, weight: .semibold))
+                    .frame(width: 30, height: 30)
+            }
+            .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+            .accessibilityLabel("Options")
+        }
+        .padding(.horizontal, 20).padding(.top, 16).padding(.bottom, 12)
     }
 
-    private var picker: some View {
-        VStack(alignment:.leading,spacing:18) {
-            Text("Choose a conversation to continue in " + model.destination.displayName)
-                .font(.system(size:22,weight:.semibold)).fixedSize(horizontal:false,vertical:true)
-            Text("Select a chat, then continue in the other app.")
-                .font(.system(size:14)).foregroundStyle(.secondary).fixedSize(horizontal:false,vertical:true)
-            if demo || model.nativeConnected {
-                if !demo {
-                    HStack(spacing:9) {
-                        Image(systemName:"magnifyingglass").foregroundStyle(.secondary)
-                        TextField("Search conversations or projects",text:$model.nativeSearch).textFieldStyle(.plain).focused($searchFocused)
-                            .onSubmit { if let row=rows.first { choose(row) } }
-                        Text("↵ review").font(.system(size:11)).foregroundStyle(.secondary)
-                    }.padding(12).background(Color(nsColor:.textBackgroundColor),in:RoundedRectangle(cornerRadius:11))
-                        .overlay(RoundedRectangle(cornerRadius:11).stroke(.primary.opacity(0.15)))
-                        .onAppear { searchFocused=true }
+    private var directionPill: some View {
+        Button { model.swapApps() } label: {
+            HStack(spacing: 8) {
+                providerIcon(model.source, 18)
+                Text(model.source.displayName).font(.system(size: 13, weight: .semibold))
+                Image(systemName: "arrow.right").font(.system(size: 10, weight: .bold)).foregroundStyle(.white.opacity(0.5))
+                providerIcon(model.destination, 18)
+                Text(model.destination.displayName).font(.system(size: 13, weight: .semibold))
+            }
+            .padding(.horizontal, 12).padding(.vertical, 7)
+            .background(Color.white.opacity(0.06), in: Capsule())
+            .overlay(Capsule().strokeBorder(Color.white.opacity(0.10)))
+        }
+        .buttonStyle(.plain)
+        .disabled(flying)
+        .help("Switch direction (⇥)")
+    }
+
+    private var searchBar: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "magnifyingglass").font(.system(size: 18, weight: .medium)).foregroundStyle(.white.opacity(0.5))
+            TextField("", text: $model.nativeSearch)
+                .textFieldStyle(.plain)
+                .font(.system(size: 21, weight: .regular))
+                .focused($searchFocused)
+                .disabled(!model.nativeConnected)
+                .overlay(alignment: .leading) {
+                    if model.nativeSearch.isEmpty {
+                        Text(model.nativeConnected ? "Search your \(model.source.displayName) chats…" : "Connect to search")
+                            .font(.system(size: 21)).foregroundStyle(.white.opacity(0.32)).allowsHitTesting(false)
+                    }
                 }
-                LazyVStack(spacing:10) {
-                    ForEach(rows) { row in Button { choose(row) } label: { rowCard(row) }.buttonStyle(ConversationRowStyle()) }
+        }
+        .padding(.horizontal, 22).padding(.vertical, 18)
+    }
+
+    // MARK: Content states
+
+    @ViewBuilder private var content: some View {
+        if let error = model.errorMessage {
+            banner(error)
+        }
+        if !model.nativeConnected {
+            connectState
+        } else if rows.isEmpty {
+            emptyState
+        } else {
+            resultList
+        }
+    }
+
+    private var resultList: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(spacing: 6) {
+                    ForEach(rows) { row in
+                        ConversationRow(row: row,
+                                        highlighted: row.id == model.highlightedID,
+                                        destination: model.destination.displayName)
+                            .id(row.id)
+                            .contentShape(Rectangle())
+                            .onTapGesture { model.highlightedID = row.id; model.flyHighlighted() }
+                            .onHover { if $0 { model.highlightedID = row.id } }
+                    }
+                    if model.nativeNextCursor != nil {
+                        Button(action: model.loadMoreNativeThreads) {
+                            Text(model.nativeBusy ? "Loading…" : "Show more")
+                                .font(.system(size: 12, weight: .medium)).foregroundStyle(.white.opacity(0.6))
+                                .frame(maxWidth: .infinity).padding(.vertical, 10)
+                        }.buttonStyle(.plain).disabled(model.nativeBusy)
+                    }
                 }
-                if rows.isEmpty { Text(model.nativeSearch.isEmpty ? "No conversations available here yet." : "No conversations match your search.").foregroundStyle(.secondary).padding(.vertical,20) }
-                if !demo && model.nativeNextCursor != nil { Button("Show more conversations",action:model.loadMoreNativeThreads).disabled(model.nativeBusy) }
-            } else if model.nativeBusy {
-                HStack(spacing:10) { ProgressView().controlSize(.small); Text("Loading your conversations…") }.padding(.vertical,28)
+                .padding(.horizontal, 12).padding(.vertical, 10)
+            }
+            .frame(maxHeight: 360)
+            .onChange(of: model.highlightedID) { id in
+                guard let id else { return }
+                withAnimation(reduced ? nil : .easeOut(duration: 0.12)) { proxy.scrollTo(id, anchor: .center) }
+            }
+        }
+    }
+
+    private var connectState: some View {
+        VStack(spacing: 16) {
+            providerIcon(model.source, 46).opacity(0.9)
+            Text("Connect to your \(model.source.displayName) chats")
+                .font(.system(size: 18, weight: .semibold))
+            Text(model.source == .claude
+                 ? "Reads your local Claude Code sessions, read-only. Chat and Cowork aren’t available here."
+                 : "Starts your signature-verified Codex CLI once, read-only, to list your recent chats.")
+                .font(.system(size: 13)).foregroundStyle(.white.opacity(0.6))
+                .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: 440)
+            Button { model.reconnectNativeCodex() } label: {
+                Text(model.nativeBusy ? "Connecting…" : "Connect \(model.source.displayName)  ↵")
+            }
+            .buttonStyle(RelayPrimaryButton()).frame(width: 260).disabled(model.nativeBusy)
+        }
+        .frame(maxWidth: .infinity).padding(.vertical, 46).padding(.horizontal, 24)
+    }
+
+    private var emptyState: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "bubble.left.and.bubble.right").font(.system(size: 30)).foregroundStyle(.white.opacity(0.3))
+            Text(model.nativeSearch.isEmpty ? "No conversations here yet." : "Nothing matches “\(model.nativeSearch)”.")
+                .font(.system(size: 14)).foregroundStyle(.white.opacity(0.6))
+        }
+        .frame(maxWidth: .infinity).padding(.vertical, 60)
+    }
+
+    // MARK: Flight (the whoosh)
+
+    private var flight: some View {
+        VStack(spacing: 22) {
+            ZStack {
+                WhooshTrail(active: model.stage != .complete && model.stage != .review, forceReduceMotion: reduced)
+                    .frame(height: 96)
+                HStack {
+                    providerIcon(model.source, 42)
+                        .scaleEffect(departed ? 0.6 : 1).opacity(departed ? 0.25 : 1)
+                    Spacer()
+                    providerIcon(model.destination, 52)
+                        .scaleEffect(model.stage == .complete ? 1.12 : (departed ? 1.04 : 0.92))
+                        .shadow(color: Color(red: 1, green: 0.62, blue: 0.45).opacity(departed ? 0.6 : 0), radius: 18)
+                }
+                .padding(.horizontal, 40)
+                .animation(reduced ? nil : .spring(response: 0.5, dampingFraction: 0.75), value: model.stage)
+            }
+            VStack(spacing: 6) {
+                Text(flightTitle).font(.system(size: 20, weight: .semibold))
+                Text(flightSubtitle).font(.system(size: 13)).foregroundStyle(.white.opacity(0.6))
+                    .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true).frame(maxWidth: 460)
+            }
+            if model.stage == .complete {
+                Button("New handoff  ↵") { model.startAgain() }.buttonStyle(RelaySecondaryButton())
+            } else if model.stage == .review {
+                Button("Back to chats") { model.startAgain() }.buttonStyle(RelaySecondaryButton())
+            }
+        }
+        .frame(maxWidth: .infinity).padding(.vertical, 46).padding(.horizontal, 24)
+    }
+
+    private var departed: Bool { [.departing, .opening, .complete].contains(model.stage) }
+    private var flightTitle: String {
+        switch model.stage {
+        case .complete: return "Opened in " + model.destination.displayName
+        case .review: return "Couldn’t open " + model.destination.displayName
+        default: return model.nativeBusy ? "Reading your conversation…" : "Sending to " + model.destination.displayName
+        }
+    }
+    private var flightSubtitle: String {
+        switch model.stage {
+        case .complete: return "Your context is in the new \(model.destination.displayName) composer. Review it and press Send — Whoosh never submits for you."
+        case .review: return model.errorMessage ?? "The handoff was prepared but the destination didn’t open."
+        default: return "Preserving the conversation and preparing a draft. This takes a moment."
+        }
+    }
+
+    // MARK: Bits
+
+    private var hintBar: some View {
+        HStack(spacing: 18) {
+            if flying { key("esc", "Close") }
+            else {
+                key("↵", "Send to " + model.destination.displayName)
+                key("⇥", "Swap")
+                key("esc", "Close")
+            }
+            Spacer()
+            Text("Only the chat you pick moves. Nothing is sent automatically.")
+                .font(.system(size: 10.5)).foregroundStyle(.white.opacity(0.35))
+        }
+        .padding(.horizontal, 20).padding(.vertical, 11)
+        .background(Color.black.opacity(0.22))
+        .overlay(Divider().overlay(Color.white.opacity(0.07)), alignment: .top)
+    }
+
+    private func key(_ k: String, _ label: String) -> some View {
+        HStack(spacing: 6) {
+            Text(k).font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .padding(.horizontal, 6).padding(.vertical, 2)
+                .background(Color.white.opacity(0.09), in: RoundedRectangle(cornerRadius: 5))
+            Text(label).font(.system(size: 11, weight: .medium)).foregroundStyle(.white.opacity(0.55))
+        }
+    }
+
+    private func banner(_ text: String) -> some View {
+        Label(text, systemImage: "exclamationmark.triangle")
+            .font(.system(size: 12)).foregroundStyle(Color(red: 1, green: 0.8, blue: 0.55))
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
+            .padding(.horizontal, 16).padding(.top, 12)
+    }
+
+    private func providerIcon(_ app: RelayModel.AgentApp, _ size: CGFloat) -> some View {
+        Group {
+            if let image = WhooshIdentity.providerIcon(app) {
+                Image(nsImage: image).resizable().aspectRatio(contentMode: .fit)
             } else {
-                Text("Connect once to see local " + model.source.displayName + " conversations. Blink reads only the chat you choose.")
-                    .foregroundStyle(.secondary).fixedSize(horizontal:false,vertical:true)
-                Button("Connect " + model.source.displayName) { model.reconnectNativeCodex() }.buttonStyle(.borderedProminent).controlSize(.large)
-                if model.source == .claude { Text("Local Code sessions only. Claude Chat and Cowork aren’t available here.").font(.system(size:12)).foregroundStyle(.secondary) }
+                Image(systemName: app == .codex ? "terminal" : "sparkle")
+                    .font(.system(size: size * 0.7)).foregroundStyle(.white.opacity(0.8))
             }
-        }
-    }
-
-    private func rowCard(_ row:RelayModel.NativeThread) -> some View {
-        HStack(alignment:.top,spacing:16) {
-            Image(systemName:"text.bubble").font(.system(size:19)).foregroundStyle(.secondary).frame(width:24).padding(.top,3)
-            VStack(alignment:.leading,spacing:5) {
-                Text(row.title).font(.system(size:16,weight:.semibold)).lineLimit(2).multilineTextAlignment(.leading).fixedSize(horizontal:false,vertical:true)
-                metadata(row)
-                if !row.preview.isEmpty && row.preview != row.title { Text(row.preview).font(.system(size:13)).foregroundStyle(.secondary).lineLimit(1).multilineTextAlignment(.leading) }
-            }.frame(maxWidth:.infinity,alignment:.leading)
-            VStack(spacing:8) { Image(systemName:"arrow.up.right").font(.system(size:13,weight:.semibold)); Text("Review").font(.system(size:10,weight:.medium)) }.foregroundStyle(.secondary).padding(.top,5)
-        }.padding(13).frame(maxWidth:.infinity,alignment:.leading)
-    }
-    private func metadata(_ row:RelayModel.NativeThread) -> some View {
-        HStack(spacing:6) {
-            Image(systemName:"folder").font(.system(size:11))
-            Text(row.projectName).lineLimit(1)
-            if let date=row.updatedAt { Text("·"); Text(activityLabel(date)) }
-        }.font(.system(size:12)).foregroundStyle(.secondary)
-    }
-    private func activityLabel(_ date: Date) -> String {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .abbreviated
-        return formatter.localizedString(for: date, relativeTo: Date())
-    }
-    private func choose(_ row:RelayModel.NativeThread) {
-        searchFocused=false
-        if demo { withAnimation(.easeInOut(duration:0.18)) { demoSelected=row } }
-        else { model.selectNativeThread(row.id) }
-    }
-
-    private var selection: some View {
-        VStack(alignment:.leading,spacing:20) {
-            HStack {
-                Button { if demo { demoSelected=nil; demoStage = .compose } else { model.startAgain() } } label: { Label("Conversations",systemImage:"chevron.left") }.buttonStyle(.plain).foregroundStyle(.secondary).disabled(busy)
-                Spacer()
-                icon(model.destination,28)
-                Text(model.destination.displayName).font(.system(size:14,weight:.semibold))
-            }
-            Text(stage == .compose ? "Continue where you left off" : stage == .departing ? "Bringing your context along" : "Preparing your conversation")
-                .font(.system(size:24,weight:.semibold))
-            VStack(alignment:.leading,spacing:14) {
-                HStack { icon(model.source,24); Text(model.source.displayName).font(.system(size:12,weight:.medium)).foregroundStyle(.secondary); Spacer(); Image(systemName:"text.bubble").foregroundStyle(.secondary) }
-                Text(selected?.title ?? model.conversationDisplayName ?? "Selected conversation").font(.system(size:22,weight:.semibold)).fixedSize(horizontal:false,vertical:true)
-                if let row=selected { metadata(row); if !row.preview.isEmpty && row.preview != row.title { Text(row.preview).font(.system(size:14)).foregroundStyle(.secondary).lineLimit(3) } }
-            }.padding(24).frame(maxWidth:.infinity,alignment:.leading)
-                .background(Color(nsColor:.controlBackgroundColor),in:RoundedRectangle(cornerRadius:18))
-                .overlay(RoundedRectangle(cornerRadius:18).stroke(.primary.opacity(0.13)))
-                .shadow(color:.black.opacity(stage == .departing ? 0.02 : 0.1),radius:18,y:8)
-                .scaleEffect(departing && !reduced ? 0.76 : 1,anchor:.topTrailing)
-                .offset(x:departing && !reduced ? 120 : 0,y:departing && !reduced ? -65 : 0)
-                .opacity(departing ? 0 : 1)
-                .animation(.easeIn(duration:reduced ? 0.14 : 0.28),value:stage)
-            if busy {
-                HStack(spacing:10) {
-                    ProgressView().controlSize(.small)
-                    Text(model.nativeBusy ? "Reading the conversation and checking its context…" : stage == .opening ? "Waiting for macOS to open the destination…" : stage == .departing ? "Context saved. Opening the destination…" : model.phase.rawValue)
-                        .font(.system(size:14)).foregroundStyle(.secondary)
-                }
-                if !demo && model.canCancelSourceRead { Button("Cancel reading",action:model.cancelSourceRead) }
-                else if stage == .preparing || stage == .departing { Button("Cancel") { if demo { demoStage = .compose } else { model.cancelPreparation() } } }
-            } else if stage == .compose {
-                if !demo && model.sensitiveContentBlocked { message("Possible sensitive data was found. Review it in Details before continuing.",warning:true) }
-                if !demo && model.projectURL == nil && model.conversation != nil { Button("Choose the missing project folder…") { model.chooseFolder(output:false) }.buttonStyle(.bordered) }
-                if demo || (!model.sourceIdleKnown && model.conversation != nil) {
-                    Toggle(isOn:demo ? $demoStopped : $model.sourceStopped) { Text("The source has finished working").font(.system(size:14,weight:.medium)) }.toggleStyle(.checkbox)
-                    Text("Blink can’t verify whether this source is still working. Stop it there before continuing.").font(.system(size:12)).foregroundStyle(.secondary)
-                }
-                if !demo && model.conversation?.isPartial == true { message("This export doesn’t include every kind of source content. See Details for what’s missing.",warning:true) }
-                if !demo { DisclosureGroup("Add an instruction (optional)") { TextField("What should happen next?",text:$model.userInstruction,axis:.vertical).textFieldStyle(.roundedBorder).lineLimit(2...4).padding(.top,8) }.font(.system(size:13)) }
-                Text("A new draft will open in " + model.destination.displayName + ". Review it and press Send there. File access may need its approval.").font(.system(size:13)).foregroundStyle(.secondary).fixedSize(horizontal:false,vertical:true)
-                if !demo { DisclosureGroup("Details",isExpanded:$details) {
-                    VStack(alignment:.leading,spacing:10) {
-                        Text(model.conversationNotice ?? "No archive loaded.")
-                        Text(model.conversation?.preview ?? "").font(.system(size:11,design:.monospaced)).textSelection(.enabled)
-                    }.font(.system(size:12)).foregroundStyle(.secondary).padding(.top,8)
-                }.font(.system(size:12)) }
-            } else if stage == .review {
-                message("The files are preserved, but the destination did not open. Check the error above before trying again.",warning:true)
-                Button("Return to conversation",action:model.editCheckpoint)
-            }
-        }
-    }
-
-    private var completion: some View {
-        VStack(alignment:.leading,spacing:22) {
-            icon(model.destination,42)
-            Text(demo ? "Preview complete" : "Check your draft in " + model.destination.displayName).font(.system(size:25,weight:.semibold))
-            Text(demo ? "This demonstrated the transition only. No app opened and no context was sent." : "macOS accepted the open request. Review the draft in the other app and press Send to continue. Blink cannot verify that it read the archive.")
-                .font(.system(size:15)).foregroundStyle(.secondary).fixedSize(horizontal:false,vertical:true)
-            Button(demo ? "Back to preview" : "Choose another conversation") { if demo { demoSelected=nil; demoStage = .compose; demoStopped=false } else { model.startAgain() } }.buttonStyle(.bordered)
-        }.frame(maxWidth:.infinity,alignment:.leading).padding(.vertical,30)
-    }
-    private var footer: some View {
-        VStack(alignment:.leading,spacing:10) {
-            Divider()
-            if hasSelection && stage == .compose {
-                if let blocker = demo ? (demoStopped ? nil : "Confirm the source is stopped to continue.") : model.selectionBlocker { Text(blocker).font(.system(size:12)).foregroundStyle(.secondary) }
-                Button {
-                    if demo { runPreview() } else { model.continueHandoff() }
-                } label: {
-                    HStack { icon(model.destination,24); Text("Continue in " + model.destination.displayName).font(.system(size:16,weight:.semibold)); Spacer(); Text("↵").font(.system(size:18)) }.padding(.horizontal,16).frame(height:52).frame(maxWidth:.infinity)
-                }.buttonStyle(.borderedProminent).controlSize(.large).keyboardShortcut(.defaultAction)
-                    .disabled(demo ? !demoStopped : !model.canPrepare)
-                Text("Only this selected conversation is shared. Nothing is submitted automatically.").font(.system(size:11)).foregroundStyle(.secondary)
-            } else if !hasSelection { Text("Choose a conversation to review it. Nothing opens yet.").font(.system(size:12)).foregroundStyle(.secondary) }
-            else { Text("Esc closes Blink. No automatic submission.").font(.system(size:12)).foregroundStyle(.secondary) }
-        }.padding(.horizontal,24).padding(.bottom,20)
-    }
-    private var optionPanel: some View {
-        VStack(alignment:.leading,spacing:16) {
-            HStack { Text("Options").font(.headline); Spacer(); Button("Done") { options=false } }
-            Button("Switch direction",action:model.swapApps).disabled(busy || demo)
-            if model.nativeConnected { Button("Disconnect " + model.source.displayName,action:model.disconnectNativeCodex).disabled(busy) }
-            Toggle("Reduce motion in Blink",isOn:$model.reduceMotionInBlink)
-            Divider()
-            DisclosureGroup("Advanced") {
-                VStack(alignment:.leading,spacing:12) {
-                    Button("Import a conversation export…",action:model.importConversation)
-                    Button("Locate Codex helper…",action:model.connectNativeCodex)
-                    Toggle("Include owned Blink test chats",isOn:$model.includeOwnedTestChats)
-                    Button(demo ? "Exit design preview" : "Design preview (synthetic)") { demo.toggle(); UserDefaults.standard.set(demo, forKey:"blinkDesignPreview"); demoSelected=nil; demoStage = .compose; demoStopped=false; options=false }
-                    Text("Exact active-chat detection isn’t available through these connections. Blink uses a picker; it never guesses from recency.").font(.system(size:12)).foregroundStyle(.secondary)
-                }.padding(.top,12)
-            }
-        }.padding(20).frame(width:360)
-    }
-    private func runPreview() {
-        demoStage = .preparing
-        Task {
-            try? await Task.sleep(nanoseconds:400_000_000)
-            guard demoStage == .preparing else { return }
-            demoStage = .departing
-            try? await Task.sleep(nanoseconds:reduced ? 140_000_000 : 340_000_000)
-            guard demoStage == .departing else { return }
-            demoStage = .complete
-        }
-    }
-    private func icon(_ app:RelayModel.AgentApp,_ size:CGFloat) -> some View {
-        Group { if let image=BlinkIdentity.providerIcon(app) { Image(nsImage:image).resizable().aspectRatio(contentMode:.fit) } else { Image(systemName:"app") } }.frame(width:size,height:size).accessibilityHidden(true)
-    }
-    private func message(_ text:String,warning:Bool) -> some View {
-        Label(text,systemImage:warning ? "exclamationmark.circle" : "info.circle").font(.system(size:13)).fixedSize(horizontal:false,vertical:true).padding(13).frame(maxWidth:.infinity,alignment:.leading).background(Color.orange.opacity(0.10),in:RoundedRectangle(cornerRadius:10))
+        }.frame(width: size, height: size).accessibilityHidden(true)
     }
 }
-private struct ConversationRowStyle: ButtonStyle {
-    func makeBody(configuration:Configuration) -> some View {
-        configuration.label.background(Color(nsColor:.controlBackgroundColor).opacity(configuration.isPressed ? 0.55 : 1),in:RoundedRectangle(cornerRadius:13))
-            .overlay(RoundedRectangle(cornerRadius:13).stroke(.primary.opacity(configuration.isPressed ? 0.28 : 0.10)))
-            .contentShape(RoundedRectangle(cornerRadius:13))
+
+private struct ConversationRow: View {
+    let row: RelayModel.NativeThread
+    let highlighted: Bool
+    let destination: String
+
+    var body: some View {
+        HStack(spacing: 14) {
+            Image(systemName: "text.bubble.fill").font(.system(size: 15))
+                .foregroundStyle(highlighted ? Color(red: 1, green: 0.7, blue: 0.52) : .white.opacity(0.4))
+                .frame(width: 22)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(row.title.isEmpty ? "Untitled conversation" : row.title)
+                    .font(.system(size: 15, weight: .medium)).lineLimit(1).truncationMode(.tail)
+                HStack(spacing: 6) {
+                    Image(systemName: "folder").font(.system(size: 10))
+                    Text(row.projectName).lineLimit(1)
+                    if let date = row.updatedAt { Text("·"); Text(Self.activity(date)) }
+                }
+                .font(.system(size: 11.5)).foregroundStyle(.white.opacity(0.5))
+            }
+            Spacer(minLength: 8)
+            if highlighted {
+                HStack(spacing: 5) {
+                    Text("Send").font(.system(size: 11, weight: .semibold))
+                    Image(systemName: "arrow.turn.down.left").font(.system(size: 10, weight: .bold))
+                }
+                .foregroundStyle(Color(red: 1, green: 0.72, blue: 0.54))
+                .padding(.horizontal, 9).padding(.vertical, 4)
+                .background(Color(red: 1, green: 0.62, blue: 0.45).opacity(0.14), in: Capsule())
+            }
+        }
+        .padding(.horizontal, 14).padding(.vertical, 11)
+        .background(highlighted ? Color.white.opacity(0.09) : Color.clear, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.white.opacity(highlighted ? 0.14 : 0), lineWidth: 1))
+    }
+
+    static func activity(_ date: Date) -> String {
+        let f = RelativeDateTimeFormatter(); f.unitsStyle = .abbreviated
+        return f.localizedString(for: date, relativeTo: Date())
     }
 }

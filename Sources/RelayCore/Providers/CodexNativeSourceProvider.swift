@@ -7,7 +7,7 @@ public actor CodexNativeSourceProvider {
     private var connected = false
     private var generation = UUID()
     private var listedIDs = Set<String>()
-    private let maximumArchiveBytes = 32 * 1024 * 1024
+    private let maximumArchiveBytes = 240 * 1024 * 1024
 
     public init(transport: any CodexReadOnlyRPCTransport = CodexStdioTransport()) { self.transport = transport }
 
@@ -20,7 +20,7 @@ public actor CodexNativeSourceProvider {
             let version = try await transport.connect(executableURL: executableURL)
             try checkGeneration(session)
             let response = try await transport.request(.initialize, params: [
-                "clientInfo": .object(["name": .string("blink_handoff"), "title": .string("Blink"), "version": .string("0.1.0")]),
+                "clientInfo": .object(["name": .string("whoosh_handoff"), "title": .string("Whoosh"), "version": .string("0.1.0")]),
                 "capabilities": .object(["experimentalApi": .bool(false)])
             ])
             try checkGeneration(session)
@@ -62,10 +62,10 @@ public actor CodexNativeSourceProvider {
 
     /// Reads only an ID explicitly returned by this connection's picker. Bounded, oldest-first pages.
     /// A partial result MUST remain visibly marked partial in the calling UI and archive manifest.
-    public func readThread(id: String, maxPages: Int? = nil, pageSize: Int = 100, timeBudgetSeconds: Double = 60) async throws -> CodexSelectedThread {
+    public func readThread(id: String, maxPages: Int? = nil, pageSize: Int = 100, timeBudgetSeconds: Double = 240) async throws -> CodexSelectedThread {
         let session = try requireConnection()
         guard listedIDs.contains(id) else { throw CodexSourceError.notListed }
-        let deadline = Date().addingTimeInterval(timeBudgetSeconds.isFinite ? max(0, min(timeBudgetSeconds, 60)) : 60)
+        let deadline = Date().addingTimeInterval(timeBudgetSeconds.isFinite ? max(0, min(timeBudgetSeconds, 240)) : 240)
         try Task.checkCancellation()
         let metadata = try await boundedRequest(.threadRead, deadline: deadline, params: ["threadId": .string(id), "includeTurns": .bool(false)])
         try checkGeneration(session)
@@ -120,7 +120,7 @@ public actor CodexNativeSourceProvider {
 
     private func boundedRequest(_ method: CodexReadMethod, deadline: Date, params: [String:CodexJSONValue]) async throws -> CodexRPCResponse {
         let remaining = deadline.timeIntervalSinceNow
-        guard remaining > 0 else { throw CodexSourceError.invalidResponse("Full history capture exceeded 60 seconds. No continuation was prepared. Try again when the source is idle or use a complete explicit export.") }
+        guard remaining > 0 else { throw CodexSourceError.invalidResponse("Full history capture exceeded its time budget. No continuation was prepared. Try again when the source is idle or use a complete explicit export.") }
         let transport = self.transport
         return try await withThrowingTaskGroup(of: CodexRPCResponse.self) { group in
             group.addTask { try await transport.request(method, params: params) }

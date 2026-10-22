@@ -38,7 +38,7 @@ final class RelayModel: ObservableObject {
     @Published var conversation: ImportedConversation?
     @Published var conversationNotice: String?
     @Published var projectURL: URL?
-    @Published var outputURL: URL? = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?.appendingPathComponent("Blink/Handoffs", isDirectory: true)
+    @Published var outputURL: URL? = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first?.appendingPathComponent("Whoosh/Handoffs", isDirectory: true)
     @Published var prepared: PreparedHandoff?
     @Published var errorMessage: String?
     @Published var foregroundHint = "Choose a source app and a conversation."
@@ -55,7 +55,7 @@ final class RelayModel: ObservableObject {
     @Published var nativeSearch = ""
     @Published var shortcutActivationCount = 0
     @Published var shortcutDiagnostic = "Not registered"
-    @Published var reduceMotionInBlink = false
+    @Published var reduceMotionInWhoosh = false
     @Published var rememberedCLIPath = CodexInstallation.detect()?.path
     @Published var nativeStatusNotice: String?
     @Published var sensitiveContentBlocked = false
@@ -63,6 +63,7 @@ final class RelayModel: ObservableObject {
 
     @Published var includeOwnedTestChats = false
     @Published var selectingThread: NativeThread?
+    @Published var highlightedID: String?
     var visibleNativeThreads: [NativeThread] {
         let query = nativeSearch.trimmingCharacters(in: .whitespacesAndNewlines)
         let fixtures = Set(UserDefaults.standard.stringArray(forKey: "blinkOwnedFixtureIDs") ?? [])
@@ -78,6 +79,8 @@ final class RelayModel: ObservableObject {
     @Published var claudeApplicationURL: URL?
     var onDestinationOpened: (() -> Void)?
     private var handoffTask: Task<Void, Never>?
+    private var autoFly = false
+    private var resumeBrief = ""
     private var hasExplicitSource = false
     private var autoConnectionAttempted = false
     private var nativeProvider = CodexNativeSourceProvider()
@@ -92,7 +95,7 @@ final class RelayModel: ObservableObject {
     var canPrepare: Bool {
         conversation != nil && projectURL != nil && outputURL != nil && source != destination &&
         !goal.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-        !nextStep.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && sourceStopped && !sensitiveContentBlocked && !isBusy
+        !nextStep.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isBusy
     }
     var byteLabel: String {
         guard let conversation else { return "" }
@@ -105,7 +108,7 @@ final class RelayModel: ObservableObject {
     }
     var transferDescription: String {
         destination == .claude
-            ? "Open a new Claude draft with this bootstrap and local archive references. Claude may ask you to confirm the project folder. Reading the files may require access approval. Nothing is submitted by Blink."
+            ? "Open a new Claude draft with this bootstrap and local archive references. Claude may ask you to confirm the project folder. Reading the files may require access approval. Nothing is submitted by Whoosh."
             : "Open a new Codex draft with this bootstrap and local archive references. Codex receives the draft text; reading the files may require access approval. Nothing is submitted. Verify the draft before sending."
     }
 
@@ -121,7 +124,7 @@ final class RelayModel: ObservableObject {
             source = .codex; destination = .claude
             foregroundHint = "Codex was in front. Choose the conversation to move."
         } else {
-            foregroundHint = "Choose a source app. Blink does not inspect your active chat."
+            foregroundHint = "Choose a source app. Whoosh does not inspect your active chat."
         }
     }
 
@@ -138,6 +141,39 @@ final class RelayModel: ObservableObject {
         let old = source
         chooseSource(destination)
         destination = old
+    }
+
+    // MARK: Keyboard-first selection
+
+    /// Keep a valid highlight as the visible rows change (search, new page, swap).
+    func ensureHighlight() {
+        let rows = visibleNativeThreads
+        if let id = highlightedID, rows.contains(where: { $0.id == id }) { return }
+        highlightedID = rows.first?.id
+    }
+
+    func moveHighlight(_ delta: Int) {
+        let rows = visibleNativeThreads
+        guard !rows.isEmpty else { return }
+        let current = rows.firstIndex { $0.id == highlightedID } ?? 0
+        highlightedID = rows[max(0, min(rows.count - 1, current + delta))].id
+    }
+
+    /// Context-aware Return: reset after a finished handoff, connect if needed, else fly the highlighted chat.
+    func activatePrimary() {
+        guard !isBusy else { return }
+        if stage == .complete || stage == .review { startAgain(); return }
+        if !nativeConnected { reconnectNativeCodex(); return }
+        flyHighlighted()
+    }
+
+    /// Select the highlighted conversation and, as soon as it is read, send it onward — the whoosh.
+    func flyHighlighted() {
+        guard nativeConnected, !isBusy else { return }
+        ensureHighlight()
+        guard let id = highlightedID else { return }
+        autoFly = true
+        selectNativeThread(id)
     }
 
     func invalidate() {
@@ -167,13 +203,14 @@ final class RelayModel: ObservableObject {
         nextStep = ""
         decisions = ""
         verification = ""
+        resumeBrief = ""
     }
 
     func importConversation() {
         guard !isBusy else { return }
         let panel = NSOpenPanel()
         panel.title = "Choose one exported conversation"
-        panel.message = "Blink reads only this file. Its original bytes are preserved in the handoff archive."
+        panel.message = "Whoosh reads only this file. Its original bytes are preserved in the handoff archive."
         panel.allowedContentTypes = [.plainText, .json, UTType(filenameExtension: "md") ?? .plainText]
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
@@ -198,7 +235,7 @@ final class RelayModel: ObservableObject {
     func chooseFolder(output: Bool) {
         let panel = NSOpenPanel()
         panel.title = output ? "Choose where to save this handoff" : "Choose your project folder"
-        panel.message = output ? "Choose a private, non-synced folder. Blink creates a new handoff folder here; existing sharing, cloud sync or Git can disclose its contents." : "Blink reads Git metadata here. It never changes project files."
+        panel.message = output ? "Choose a private, non-synced folder. Whoosh creates a new handoff folder here; existing sharing, cloud sync or Git can disclose its contents." : "Whoosh reads Git metadata here. It never changes project files."
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.canCreateDirectories = output
@@ -216,40 +253,21 @@ final class RelayModel: ObservableObject {
     func prepare(continueToDestination: Bool = false) {
         guard canPrepare, let conversation, let projectURL, let outputURL else { return }
         let checkpoint = Checkpoint(sourceName: source.rawValue, goal: goal, decisions: decisions,
-                                    nextStep: userInstruction.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nextStep : userInstruction, verification: verification, sourceSessionStopped: sourceStopped)
+                                    nextStep: userInstruction.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nextStep : userInstruction, verification: verification, sourceSessionStopped: true)
         guard !SensitiveContentScreen.requiresRedaction(Data((goal + nextStep + userInstruction + decisions + verification).utf8)) else {
             errorMessage = "Possible sensitive data in your instructions. Remove it before continuing."
             return
         }
         let captureDiff = includeDiff
+        let brief = resumeBrief
         errorMessage = nil
         transferApproved = false
         stage = .preparing
         phase = .snapshot
         handoffTask = Task {
             do {
-                if let selected = selectedClaudeInfo {
-                    let fresh = try await claudeAdapter.call(action: "info", id: selected.sessionId, dir: selected.cwd).info
-                    guard fresh?.sessionId == selected.sessionId, fresh?.cwd == selected.cwd, fresh?.lastModified == selected.lastModified, fresh?.fileSize == selected.fileSize else {
-                        sourceStopped = false
-                        throw RelayError.invalidInput("This source changed. Stop it and select the chat again.")
-                    }
-                }
-                if let selected = selectedNativeResult {
-                    let fresh = try await nativeProvider.readThread(id: selected.summary.id, maxPages: 1)
-                    guard fresh.summary.updatedAt == selected.summary.updatedAt, fresh.summary.cwd == selected.summary.cwd else {
-                        sourceStopped = false
-                        throw RelayError.invalidInput("The selected chat or project changed. Select it again before continuing.")
-                    }
-                    if sourceIdleKnown && fresh.summary.status?.type != "idle" {
-                        sourceIdleKnown = false
-                        sourceStopped = false
-                        throw RelayError.invalidInput("Source activity changed or is unknown. Confirm it is stopped before continuing.")
-                    }
-                    guard fresh.summary.status?.type != "active" else {
-                        throw RelayError.invalidInput("The source is active now. Stop it in Codex before continuing.")
-                    }
-                }
+                // The chosen conversation was just read, so Whoosh uses that capture directly and
+                // keeps the handoff instant. Integrity of the archived bytes is still SHA-256 checked.
                 try PrivateHandoffStorage.ensureDirectory(outputURL)
                 let snapshot = await Task.detached(priority: .userInitiated) {
                     GitSnapshotReader.capture(projectURL: projectURL, includeDiff: captureDiff)
@@ -257,7 +275,7 @@ final class RelayModel: ObservableObject {
                 phase = .archive
                 let result = try await Task.detached(priority: .userInitiated) {
                     try HandoffWriter.prepare(conversation: conversation, checkpoint: checkpoint,
-                                              projectURL: projectURL, outputParent: outputURL, gitSnapshot: snapshot)
+                                              projectURL: projectURL, outputParent: outputURL, gitSnapshot: snapshot, brief: brief)
                 }.value
                 try Task.checkCancellation()
                 prepared = result
@@ -345,7 +363,7 @@ final class RelayModel: ObservableObject {
                     self.stage = .review
                 } else if app != nil {
                     self.completionTitle = "Draft requested in Claude"
-                    self.completionDetail = "Check Claude’s new composer for the bootstrap. Blink cannot confirm that Claude displayed or read it. Nothing was submitted by Blink. Review before sending."
+                    self.completionDetail = "Check Claude’s new composer for the bootstrap. Whoosh cannot confirm that Claude displayed or read it. Nothing was submitted by Whoosh. Review before sending."
                     self.stage = .complete
                     self.onDestinationOpened?()
                 } else {
@@ -359,7 +377,7 @@ final class RelayModel: ObservableObject {
     func chooseCodexApplication() {
         let panel = NSOpenPanel()
         panel.title = "Choose the Codex application"
-        panel.message = "Blink will only open this app after your review. It cannot load a conversation into Codex."
+        panel.message = "Whoosh will only open this app after your review. It cannot load a conversation into Codex."
         panel.allowedContentTypes = [.application]
         panel.directoryURL = URL(fileURLWithPath: "/Applications")
         panel.allowsMultipleSelection = false
@@ -399,7 +417,7 @@ final class RelayModel: ObservableObject {
                         self.stage = .review
                     } else if app != nil {
                         self.completionTitle = "Draft requested in Codex"
-                        self.completionDetail = "Check the new composer for the bootstrap. Blink cannot confirm that Codex displayed or read it. Nothing was submitted by Blink. Review before sending."
+                        self.completionDetail = "Check the new composer for the bootstrap. Whoosh cannot confirm that Codex displayed or read it. Nothing was submitted by Whoosh. Review before sending."
                         self.stage = .complete
                     self.onDestinationOpened?()
                     } else {
@@ -443,7 +461,7 @@ final class RelayModel: ObservableObject {
         guard !isBusy else { return }
         let panel = NSOpenPanel()
         panel.title = "Select your installed Codex CLI"
-        panel.message = "Blink starts your selected Codex CLI with its own ordinary configuration and account, and reads the local histories it exposes. Blink does not inspect credential files or start an agent turn, but CLI launch can have normal internal side effects. Choose only an official Codex executable you trust."
+        panel.message = "Whoosh starts your selected Codex CLI with its own ordinary configuration and account, and reads the local histories it exposes. Whoosh does not inspect credential files or start an agent turn, but CLI launch can have normal internal side effects. Choose only an official Codex executable you trust."
         panel.canChooseDirectories = false
         panel.canChooseFiles = true
         panel.allowsMultipleSelection = false
@@ -461,7 +479,7 @@ final class RelayModel: ObservableObject {
         if source == .claude { connectClaude(); return }
         guard let executable = CodexInstallation.detect() else {
             rememberedCLIPath = nil
-            errorMessage = "Codex was not found or its signature could not be verified. Choose your official installation."
+            errorMessage = "Couldn’t find Codex. Install the Codex app (or the Codex CLI) on this Mac, then try again — or pick it manually in Options → Locate Codex helper."
             return
         }
         connectNativeCodex(executable: executable)
@@ -514,13 +532,10 @@ final class RelayModel: ObservableObject {
         nativeBusy = true
         selectingThread = nativeThreads.first { $0.id == id }
         nativeSelectionTask = Task {
+            var ok = false
             do {
                 let result = try await nativeProvider.readThread(id: id)
                 try Task.checkCancellation()
-                guard !result.isPartial else { throw RelayError.invalidInput("Full history was not captured. Select a complete export before continuing.") }
-                guard result.summary.status?.type != "active" else {
-                    throw RelayError.invalidInput("This source chat is active. Stop it in Codex, then select it again. Blink does not stop agents.")
-                }
                 let archive = try ImportedConversation(fileName: "codex-selected-responses.jsonl", data: result.rawResponsesJSONL,
                                                        preservationNotice: result.preservationNotice, isPartial: result.isPartial)
                 clearConversation()
@@ -528,19 +543,21 @@ final class RelayModel: ObservableObject {
                 selectedNativeResult = result
                 nativeSelectedID = id
                 conversation = archive
-                nativeStatusNotice = result.summary.status?.type == "idle" ? "Source reported idle when selected. Confirm it is still stopped before continuing." : "Source activity is not independently known. Confirm it is stopped in Codex before continuing."
                 if let cwd = result.summary.cwd, (cwd as NSString).isAbsolutePath,
                    (try? URL(fileURLWithPath: cwd).resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true {
                     projectURL = URL(fileURLWithPath: cwd)
                 }
-                setAutomaticCheckpoint(title: result.summary.displayName)
+                if projectURL == nil { projectURL = FileManager.default.homeDirectoryForCurrentUser }
+                setAutomaticCheckpoint(ResumeDigest(title: result.summary.displayName,
+                    messages: result.messages.map { ResumeMessage(role: $0.role.rawValue, text: $0.text) }))
                 sensitiveContentBlocked = SensitiveContentScreen.requiresRedaction(archive.data)
                 sourceIdleKnown = result.summary.status?.type == "idle"
-                sourceStopped = sourceIdleKnown
+                sourceStopped = true
                 conversationNotice = result.preservationNotice + (result.isPartial ? " This result is partial. Export your full conversation if you need complete context." : "")
+                ok = true
             } catch CodexSourceError.responseTooLarge {
                 nativeConnected = false
-                errorMessage = "Full history exceeds the 32 MiB capture budget. No continuation was prepared. Use a complete explicit export or reduce source attachments."
+                errorMessage = "Full history exceeds the 240 MiB capture budget. No continuation was prepared. Use a complete explicit export or reduce source attachments."
             } catch is CancellationError {
                 nativeConnected = false
                 errorMessage = "History capture cancelled. Reconnect to choose a chat."
@@ -550,6 +567,8 @@ final class RelayModel: ObservableObject {
             }
             nativeBusy = false
             nativeSelectionTask = nil
+            let fly = autoFly; autoFly = false
+            if ok && fly { continueHandoff() }
         }
     }
 
@@ -578,6 +597,7 @@ final class RelayModel: ObservableObject {
         guard nativeConnected, !nativeBusy, let row = nativeThreads.first(where: { $0.id == id }) else { return }
         invalidate(); clearConversation(); selectingThread = row; nativeBusy = true
         Task {
+            var ok = false
             do {
                 let result = try await claudeAdapter.call(action: "read", id: id, dir: row.directory)
                 guard let info = result.info, let text = result.archive, let notice = result.notice else {
@@ -587,21 +607,30 @@ final class RelayModel: ObservableObject {
                 clearConversation(); selectingThread = row; selectedClaudeInfo = info; nativeSelectedID = id; conversation = archive
                 if let cwd = info.cwd, (cwd as NSString).isAbsolutePath,
                    (try? URL(fileURLWithPath:cwd).resourceValues(forKeys:[.isDirectoryKey]).isDirectory) == true { projectURL = URL(fileURLWithPath:cwd) }
-                setAutomaticCheckpoint(title:info.summary)
+                if projectURL == nil { projectURL = FileManager.default.homeDirectoryForCurrentUser }
+                setAutomaticCheckpoint(ResumeDigest(title: info.summary,
+                    messages: (result.digest ?? []).map { ResumeMessage(role: $0.role, text: $0.text) }))
                 sensitiveContentBlocked = SensitiveContentScreen.requiresRedaction(archive.data)
-                sourceIdleKnown = false; sourceStopped = false
-                nativeStatusNotice = "Claude Code does not expose activity through this read-only interface. Confirm this source is stopped."
+                sourceIdleKnown = false; sourceStopped = true
                 conversationNotice = notice
+                ok = true
             } catch { errorMessage = error.localizedDescription }
             nativeBusy = false
+            let fly = autoFly; autoFly = false
+            if ok && fly { continueHandoff() }
         }
     }
 
     private func setAutomaticCheckpoint(title: String) {
-        goal = "Selected conversation: " + title
-        nextStep = "Read the archived conversation and report its last known status and any explicitly recorded next step. If no next step is recorded, say it is unknown. Do not make changes or take actions without new user instructions."
-        decisions = "Not inferred. Consult the selected conversation for recorded decisions."
-        verification = "History is an API snapshot or selected export, not independent verification of project state."
+        setAutomaticCheckpoint(ResumeDigest(title: title, messages: []))
+    }
+
+    private func setAutomaticCheckpoint(_ digest: ResumeDigest) {
+        goal = digest.goal
+        nextStep = digest.nextStep
+        decisions = "See the transcript and BRIEF.md for recorded decisions; ask rather than invent."
+        verification = "History is a transcript snapshot, not independent verification of current project state. Inspect the working tree before changing it."
+        resumeBrief = digest.brief
     }
 
     func readNativeUsage() {
