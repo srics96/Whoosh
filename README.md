@@ -23,7 +23,7 @@ composer. You review, you send. Whoosh. 💨
 brew install --cask --no-quarantine srics96/tap/whoosh
 ```
 
-**Or download** → [**Whoosh.dmg**](https://github.com/srics96/blink/releases/latest/download/Whoosh.dmg) → drag to Applications → **right-click → Open → Open** the first time.
+**Or download** → [**Whoosh.dmg**](https://github.com/srics96/Whoosh/releases/latest/download/Whoosh.dmg) → drag to Applications → **right-click → Open → Open** the first time.
 
 Then hit **⌘⇧Space**. Whoosh lives in your menu bar (the comet). ☄️
 
