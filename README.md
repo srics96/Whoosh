@@ -11,9 +11,15 @@ Switching AI agents means copy-pasting transcripts and re-explaining everything
 you'd already decided. The new agent always walks in mid-conversation — so you
 don't switch, even when the other one would crush it.
 
-Whoosh fixes that. **⌘⇧Space → pick the chat → Return.** The other app opens with
-the goal, your last request, and your project's conventions already in the
-composer. You review, you send. Whoosh. 💨
+Whoosh fixes that. **⌘⇧Space → pick the chat → Return.** A fresh session opens with
+the goal, your last request, your project's conventions, and your **uncommitted diff**
+already in the composer. You review, you send. Whoosh. 💨
+
+Two moves, one hotkey:
+
+- **Same agent, fresh session** — your chat has gotten long and the model's drifting?
+  Whoosh it into a clean session of the *same* tool with the full context reloaded. No rot.
+- **Switch tools** — hit **Tab** and send it to the other agent (Claude Code ⇄ Codex) instead.
 
 ## Install
 
@@ -35,9 +41,9 @@ Then hit **⌘⇧Space**. Whoosh lives in your menu bar (the comet). ☄️
 | Key | Does |
 | --- | --- |
 | **⌘⇧Space** | open Whoosh |
-| **Tab** | swap Claude Code ↔ Codex |
 | type / **↑ ↓** | filter and pick a chat |
-| **Return** | whoosh it to the other app |
+| **Return** | whoosh it into a fresh session of the same agent |
+| **Tab** | flip to sending it to the other agent instead |
 
 First time, click **Connect** once per source. The other app opens pre-filled —
 review it and press Send. **Whoosh never sends for you.**
@@ -45,9 +51,10 @@ review it and press Send. **Whoosh never sends for you.**
 ## What actually moves
 
 Not just the transcript — a short **brief** (the goal + where you are), your
-**`CLAUDE.md` / `AGENTS.md`** conventions, and the full history, dropped as local
-files the new agent reads. Nothing bulky gets crammed into a URL, so big chats
-move fine.
+**`CLAUDE.md` / `AGENTS.md`** conventions, your **uncommitted diff** and changed-file
+list, and the full history, dropped as local files the new agent reads. The diff is
+what makes this un-copy-pasteable: the new session resumes on the actual state of your
+tree, not a stale snapshot. Nothing bulky gets crammed into a URL, so big chats move fine.
 
 ## Good to know
 
@@ -91,15 +98,18 @@ short bootstrap that points at it:
 Whoosh-<timestamp>-<random>/
   BRIEF.md                   # Goal, latest request, recent exchange — resume from here
   context/                   # Copied CLAUDE.md / AGENTS.md conventions
+  workspace/changes.diff     # Your uncommitted staged + unstaged diff
   transcript/original.<ext>  # Full transcript (SHA-256 verified on write)
   manifest.json              # Byte/hash evidence, checkpoint, Git metadata
   CHECKPOINT.md  bootstrap.txt  README.txt
 ```
 
-Git is read as metadata only (branch/commit) — no diff, because clean filters
-can run scripts on `git status`. The Codex CLI is signature-verified before it
-runs. Opening a destination means it opened pre-filled, not that the agent read
-it.
+Git is read **read-only** — branch/commit, the changed-file list, and the
+uncommitted diff — with system/global config disabled and external diff/textconv
+off, so no repository-defined program runs. If the repo declares content filters
+(clean/smudge), the diff content is skipped and only the file list is included.
+The Codex CLI is signature-verified before it runs. Opening a destination means it
+opened pre-filled, not that the agent read it.
 
 **Code:** `RelayCore` (models, archives, handoff writer), `RelayCore/Providers`
 (read-only Codex adapter), `RelayApp` (SwiftUI/AppKit UI, hotkey, animation),

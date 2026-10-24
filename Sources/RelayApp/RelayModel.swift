@@ -24,7 +24,11 @@ final class RelayModel: ObservableObject {
     }
 
     @Published var source: AgentApp = .codex { didSet { if source != oldValue { invalidate(); clearConversation(); nativeConnected = false; nativeThreads = []; nativeNextCursor = nil; autoConnectionAttempted = false; restoreConnectionIfApproved() } } }
-    @Published var destination: AgentApp = .claude { didSet { if destination != oldValue { invalidate() } } }
+    // Defaults to the same tool: the hotkey's primary job is a fresh session of the agent you're in
+    // (context rot), with a cross-tool switch one Tab away.
+    @Published var destination: AgentApp = .codex { didSet { if destination != oldValue { invalidate() } } }
+    /// True when the handoff lands in a fresh session of the same agent, not the other tool.
+    var isFreshSession: Bool { source == destination }
     @Published var userInstruction = "" { didSet { if userInstruction != oldValue { invalidate() } } }
     @Published var goal = "" { didSet { if goal != oldValue { invalidate() } } }
     @Published var nextStep = "" { didSet { if nextStep != oldValue { invalidate() } } }
@@ -93,7 +97,7 @@ final class RelayModel: ObservableObject {
 
     var isBusy: Bool { stage == .preparing || stage == .departing || stage == .opening || nativeBusy || importBusy }
     var canPrepare: Bool {
-        conversation != nil && projectURL != nil && outputURL != nil && source != destination &&
+        conversation != nil && projectURL != nil && outputURL != nil &&
         !goal.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
         !nextStep.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isBusy
     }
@@ -118,11 +122,11 @@ final class RelayModel: ObservableObject {
         let name = (app.localizedName ?? "").lowercased()
         let identifier = (app.bundleIdentifier ?? "").lowercased()
         if name.contains("claude") || identifier.contains("claude") {
-            source = .claude; destination = .codex
-            foregroundHint = "Claude was in front. Choose the conversation to move."
+            source = .claude; destination = .claude
+            foregroundHint = "Claude Code was in front. Pick a chat for a fresh session."
         } else if name.contains("codex") || identifier.contains("codex") {
-            source = .codex; destination = .claude
-            foregroundHint = "Codex was in front. Choose the conversation to move."
+            source = .codex; destination = .codex
+            foregroundHint = "Codex was in front. Pick a chat for a fresh session."
         } else {
             foregroundHint = "Choose a source app. Whoosh does not inspect your active chat."
         }
@@ -132,16 +136,19 @@ final class RelayModel: ObservableObject {
         guard !isBusy else { return }
         hasExplicitSource = true
         source = app
-        if destination == app { destination = app.other }
-        foregroundHint = "Source selected by you. Choose a conversation below."
+        // Switching which agent you read defaults back to a fresh session of that same agent.
+        destination = app
+        foregroundHint = "Reading \(app.displayName) chats. Pick one for a fresh session."
     }
 
+    /// Tab / the direction pill: toggle the destination between a fresh same-agent session and the other tool.
     func swapApps() {
         guard !isBusy else { return }
-        let old = source
-        chooseSource(destination)
-        destination = old
+        destination = isFreshSession ? source.other : source
     }
+
+    /// The options menu: read the other agent's chats instead (source switch, not destination toggle).
+    func readOtherSource() { chooseSource(source.other) }
 
     // MARK: Keyboard-first selection
 
@@ -311,7 +318,6 @@ final class RelayModel: ObservableObject {
         if outputURL == nil { return "Private handoff storage is unavailable. Re-select the conversation to retry." }
         if goal.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || nextStep.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return "Conversation context is incomplete. Re-select it to rebuild the draft." }
         if !sourceStopped { return "Confirm the source has stopped before continuing." }
-        if source == destination { return "Choose a different destination." }
         return nil
     }
 

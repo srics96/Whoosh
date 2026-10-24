@@ -56,10 +56,23 @@ class PortableContracts(unittest.TestCase):
         self.assertIn("0o600", code)
         self.assertNotIn("[.atomic, .withoutOverwriting]", code)
 
-    def test_git_capture_is_metadata_only(self):
+    def test_git_capture_is_read_only(self):
         code = (ROOT / "Sources/RelayCore/GitSnapshotReader.swift").read_text()
         calls = re.findall(r'command\(\["([^"]+)"', code)
-        self.assertEqual(calls, ["rev-parse", "rev-parse", "symbolic-ref"])
+        # Only read-only plumbing/porcelain: metadata, changed-file list, recent log, and the
+        # tracked (staged + unstaged) diff. config is a read (--get-regexp) for the filter check.
+        allowed = {"rev-parse", "symbolic-ref", "status", "log", "diff", "config"}
+        self.assertTrue(set(calls).issubset(allowed), f"unexpected git subcommand: {set(calls) - allowed}")
+        # No mutating or network command may ever appear.
+        forbidden = {"commit", "add", "stash", "reset", "checkout", "switch", "restore", "rm",
+                     "push", "pull", "fetch", "clone", "clean", "apply", "am", "merge", "rebase",
+                     "update-index", "update-ref", "worktree", "gc", "hook", "notes", "tag"}
+        self.assertEqual(set(calls) & forbidden, set(), "mutating/network git command found")
+        # Diff runs with external diff and textconv disabled so no repo-defined program executes,
+        # and diff content is skipped when the repo declares content filters.
+        self.assertIn("--no-ext-diff", code)
+        self.assertIn("--no-textconv", code)
+        self.assertIn("hasContentFilters", code)
         self.assertNotIn('"/bin/sh"', code)
         self.assertNotIn('"/bin/bash"', code)
         self.assertIn('process.arguments = arguments', code)

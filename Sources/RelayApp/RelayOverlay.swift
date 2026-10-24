@@ -62,7 +62,8 @@ struct RelayOverlay: View {
             directionPill
             Spacer()
             Menu {
-                Button("Switch direction") { model.swapApps() }.disabled(flying)
+                Button(model.isFreshSession ? "Send to \(model.source.other.displayName) instead" : "Keep it in \(model.source.displayName) (fresh session)") { model.swapApps() }.disabled(flying)
+                Button("Read \(model.source.other.displayName) chats instead") { model.readOtherSource() }.disabled(flying)
                 if model.nativeConnected { Button("Disconnect " + model.source.displayName) { model.disconnectNativeCodex() }.disabled(flying) }
                 Divider()
                 Button("Import a conversation export…") { model.importConversation() }
@@ -84,9 +85,14 @@ struct RelayOverlay: View {
             HStack(spacing: 8) {
                 providerIcon(model.source, 18)
                 Text(model.source.displayName).font(.system(size: 13, weight: .semibold))
-                Image(systemName: "arrow.right").font(.system(size: 10, weight: .bold)).foregroundStyle(.white.opacity(0.5))
-                providerIcon(model.destination, 18)
-                Text(model.destination.displayName).font(.system(size: 13, weight: .semibold))
+                if model.isFreshSession {
+                    Image(systemName: "arrow.triangle.2.circlepath").font(.system(size: 10, weight: .bold)).foregroundStyle(.white.opacity(0.5))
+                    Text("fresh session").font(.system(size: 13, weight: .semibold)).foregroundStyle(.white.opacity(0.85))
+                } else {
+                    Image(systemName: "arrow.right").font(.system(size: 10, weight: .bold)).foregroundStyle(.white.opacity(0.5))
+                    providerIcon(model.destination, 18)
+                    Text(model.destination.displayName).font(.system(size: 13, weight: .semibold))
+                }
             }
             .padding(.horizontal, 12).padding(.vertical, 7)
             .background(Color.white.opacity(0.06), in: Capsule())
@@ -94,7 +100,7 @@ struct RelayOverlay: View {
         }
         .buttonStyle(.plain)
         .disabled(flying)
-        .help("Switch direction (⇥)")
+        .help(model.isFreshSession ? "Fresh \(model.source.displayName) session — ⇥ to switch tools" : "⇥ to keep it in \(model.source.displayName)")
     }
 
     private var searchBar: some View {
@@ -223,15 +229,22 @@ struct RelayOverlay: View {
 
     private var departed: Bool { [.departing, .opening, .complete].contains(model.stage) }
     private var flightTitle: String {
+        let dest = model.destination.displayName
         switch model.stage {
-        case .complete: return "Opened in " + model.destination.displayName
-        case .review: return "Couldn’t open " + model.destination.displayName
-        default: return model.nativeBusy ? "Reading your conversation…" : "Sending to " + model.destination.displayName
+        case .complete: return model.isFreshSession ? "Fresh \(dest) session ready" : "Opened in " + dest
+        case .review: return "Couldn’t open " + dest
+        default:
+            if model.nativeBusy { return "Reading your conversation…" }
+            return model.isFreshSession ? "Starting a fresh \(dest) session…" : "Sending to " + dest
         }
     }
     private var flightSubtitle: String {
+        let dest = model.destination.displayName
         switch model.stage {
-        case .complete: return "Your context is in the new \(model.destination.displayName) composer. Review it and press Send — Whoosh never submits for you."
+        case .complete:
+            return model.isFreshSession
+                ? "Your context is loaded in a fresh \(dest) session — clean window, nothing forgotten. Review it and press Send; Whoosh never submits for you."
+                : "Your context is in the new \(dest) composer. Review it and press Send — Whoosh never submits for you."
         case .review: return model.errorMessage ?? "The handoff was prepared but the destination didn’t open."
         default: return "Preserving the conversation and preparing a draft. This takes a moment."
         }
@@ -243,8 +256,8 @@ struct RelayOverlay: View {
         HStack(spacing: 18) {
             if flying { key("esc", "Close") }
             else {
-                key("↵", "Send to " + model.destination.displayName)
-                key("⇥", "Swap")
+                key("↵", model.isFreshSession ? "Fresh \(model.source.displayName) session" : "Send to " + model.destination.displayName)
+                key("⇥", model.isFreshSession ? "Switch tool" : "Keep in " + model.source.displayName)
                 key("esc", "Close")
             }
             Spacer()

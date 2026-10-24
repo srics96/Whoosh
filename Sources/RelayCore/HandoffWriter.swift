@@ -188,8 +188,10 @@ public enum HandoffWriter {
     Source-stopped is a user attestation, not a process check.
     Existing project files were not changed, committed, stashed, or reset. If you selected
     an output folder inside your project, the new handoff package was added there.
-    Worktree status, tracked diffs and untracked contents are not included: Git content filters
-    can execute repository-defined scripts. Review the package before another app reads it.
+    Worktree status, the changed-file list and the tracked (staged + unstaged) diff are included
+    in workspace/changes.diff. Untracked file contents are not. External diff/textconv are
+    disabled; if the repository declares Git content filters (clean/smudge), diff content is
+    skipped and only the file list is kept. Review the package before another app reads it.
     bootstrap.txt is the short, reviewable prompt; it points to local files, not an upload.
     Prompt-bearing Claude links are disabled pending prefill-only validation.
     Open the destination app and provide bootstrap.txt manually after review.
