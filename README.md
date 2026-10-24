@@ -27,15 +27,17 @@ Two moves, one hotkey:
 
 ```sh
 brew install --cask srics96/tap/whoosh
-xattr -dr com.apple.quarantine "/Applications/Whoosh.app"   # approve it once
+xattr -dr com.apple.quarantine "/Applications/Whoosh.app"   # one-time OK to run it
 ```
 
-(Whoosh is ad-hoc signed, not notarized, so macOS quarantines it. Homebrew removed
-`--no-quarantine` in 5.0, so you clear the flag yourself — or just right-click → Open.)
-
-**Or download** → [**Whoosh.dmg**](https://github.com/srics96/Whoosh/releases/latest/download/Whoosh.dmg) → drag to Applications → **right-click → Open → Open** the first time.
+**Or download** → [**Whoosh.dmg**](https://github.com/srics96/Whoosh/releases/latest/download/Whoosh.dmg) → drag to Applications → **right-click → Open → Open**.
 
 Then hit **⌘⇧Space**. Whoosh lives in your menu bar (the comet). ☄️
+
+> **First launch:** Whoosh is open-source and free, so it isn't signed with a $99/yr
+> Apple certificate — macOS flags *every* app like that until you OK it once. That's the
+> `xattr` line (or the right-click → Open). After that it just launches, forever. The
+> whole app is right here in this repo if you want to read what it does first.
 
 > Needs an **Apple Silicon Mac** + **Claude Code and/or Codex** installed.
 > Whoosh moves chats between them; it doesn't replace them.
@@ -65,8 +67,9 @@ tree, not a stale snapshot. Nothing bulky gets crammed into a URL, so big chats 
 - Reads **only the chat you pick** — read-only, all local, nothing auto-sent.
 - Codex via its signed CLI (even the one inside the Codex app); Claude Code via
   Anthropic's official SDK.
-- Open-source prototype, **ad-hoc signed, not Apple-notarized** — that's why it
-  needs one Gatekeeper approval (right-click → Open, or the `xattr` line above).
+- **Why the one-time approval?** It's open-source and unsigned by an Apple cert, so
+  macOS asks once — same as any indie tool. Not a warning about *Whoosh*; the code's
+  all here to read. Approve it once (right-click → Open, or the `xattr` line above).
 
 <details>
 <summary><b>Build it yourself</b></summary>
