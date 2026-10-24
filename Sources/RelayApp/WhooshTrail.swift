@@ -7,7 +7,11 @@ struct WhooshTrail: View {
     let active: Bool
     var forceReduceMotion = false
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    @State private var capped = false
     private var reduced: Bool { systemReduceMotion || forceReduceMotion }
+    /// A handoff is near-instant, so the shimmer only needs to run briefly. Capping it means a
+    /// hung handoff (stage stuck "in flight") can never peg a core with an endless redraw loop.
+    private static let maxAnimationSeconds: UInt64 = 6
     private let mint = WhooshGeometry.mint
     private let amber = WhooshGeometry.amber
 
@@ -19,9 +23,12 @@ struct WhooshTrail: View {
     }
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0/60.0, paused: !active || reduced)) { timeline in
+        // 30fps is plenty for a decorative trail and halves the redraw work; paused unless actively
+        // animating, reduce-motion is on, or the brief animation window has elapsed.
+        let animating = active && !reduced && !capped
+        TimelineView(.animation(minimumInterval: 1.0/30.0, paused: !animating)) { timeline in
             Canvas { ctx, size in
-                let t = active && !reduced ? timeline.date.timeIntervalSinceReferenceDate : 0
+                let t = animating ? timeline.date.timeIntervalSinceReferenceDate : 0
                 let start = CGPoint(x: 34, y: size.height/2)
                 let end = CGPoint(x: size.width - 34, y: size.height/2)
                 let c1 = CGPoint(x: size.width*0.38, y: size.height*0.10)
@@ -29,18 +36,16 @@ struct WhooshTrail: View {
                 func at(_ u: CGFloat) -> CGPoint { bezier(start, c1, c2, end, max(0, min(1, u))) }
 
                 var path = Path(); path.move(to: start); path.addCurve(to: end, control1: c1, control2: c2)
-                // glow under the trail
-                ctx.drawLayer { l in
-                    l.addFilter(.blur(radius: 7))
-                    l.stroke(path, with: .color(amber.opacity(active ? 0.4 : 0.15)), lineWidth: 4)
-                }
+                // Fake glow: a wide, faint stroke under the trail — no per-frame Gaussian blur filter,
+                // which is what made this canvas expensive to redraw.
+                ctx.stroke(path, with: .color(amber.opacity(active ? 0.16 : 0.07)), lineWidth: 7)
                 // the trail line
                 ctx.stroke(path, with: .linearGradient(
                     Gradient(colors: [mint.opacity(0.15), mint, amber, amber.opacity(0.15)]),
                     startPoint: start, endPoint: end), lineWidth: 1.4)
 
                 // flowing particles, fading in at the source and out at the destination
-                let count = 30
+                let count = 24
                 for i in 0..<count {
                     let u = (CGFloat(i)/CGFloat(count) + CGFloat(t * 0.22)).truncatingRemainder(dividingBy: 1)
                     let p = at(u)
@@ -53,7 +58,7 @@ struct WhooshTrail: View {
 
                 // sparkles just off the trail
                 for i in 0..<9 {
-                    let twinkle = active && !reduced ? abs(sin(t * 2.1 + Double(i) * 1.3)) : 0.25
+                    let twinkle = animating ? abs(sin(t * 2.1 + Double(i) * 1.3)) : 0.25
                     let p = at(CGFloat(i)/9)
                     let off = CGFloat(i % 2 == 0 ? -1 : 1) * CGFloat(9 + i)
                     let r = CGFloat(1.1) * twinkle
@@ -61,19 +66,17 @@ struct WhooshTrail: View {
                              with: .color(.white.opacity(twinkle * 0.7)))
                 }
 
-                // the comet head racing along
-                if active && !reduced {
+                // the comet head racing along — soft edge from two concentric fills, no blur filter
+                if animating {
                     let hp = at(CGFloat((t * 0.55).truncatingRemainder(dividingBy: 1)))
-                    ctx.drawLayer { l in
-                        l.addFilter(.blur(radius: 5))
-                        l.fill(Path(ellipseIn: CGRect(x: hp.x-7, y: hp.y-7, width: 14, height: 14)), with: .color(amber.opacity(0.9)))
-                    }
+                    ctx.fill(Path(ellipseIn: CGRect(x: hp.x-7, y: hp.y-7, width: 14, height: 14)), with: .color(amber.opacity(0.35)))
+                    ctx.fill(Path(ellipseIn: CGRect(x: hp.x-4.5, y: hp.y-4.5, width: 9, height: 9)), with: .color(amber.opacity(0.8)))
                     ctx.fill(Path(ellipseIn: CGRect(x: hp.x-3, y: hp.y-3, width: 6, height: 6)), with: .color(.white))
                 }
 
                 // arrival pulses at the destination
                 for i in 0..<3 {
-                    let pulse = active && !reduced ? (t * 0.45 + Double(i)/3).truncatingRemainder(dividingBy: 1) : Double(i)/3
+                    let pulse = animating ? (t * 0.45 + Double(i)/3).truncatingRemainder(dividingBy: 1) : Double(i)/3
                     let rad = CGFloat(16 + pulse * 36)
                     ctx.stroke(Path(ellipseIn: CGRect(x: end.x-rad, y: end.y-rad, width: rad*2, height: rad*2)),
                                with: .color(amber.opacity((1 - pulse) * (active ? 0.32 : 0.1))), lineWidth: 1.4)
@@ -81,6 +84,12 @@ struct WhooshTrail: View {
             }
         }
         .accessibilityHidden(true)
+        .task(id: active) {
+            capped = false
+            guard active, !reduced else { return }
+            try? await Task.sleep(nanoseconds: Self.maxAnimationSeconds * 1_000_000_000)
+            capped = true
+        }
     }
 }
 

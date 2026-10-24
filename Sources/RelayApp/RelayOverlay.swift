@@ -48,12 +48,12 @@ struct RelayOverlay: View {
     // MARK: Chrome
 
     private var background: some View {
-        ZStack {
-            Rectangle().fill(.ultraThinMaterial)
-            LinearGradient(colors: [Color(red: 0.07, green: 0.08, blue: 0.12).opacity(0.86),
-                                    Color(red: 0.04, green: 0.04, blue: 0.07).opacity(0.94)],
-                           startPoint: .top, endPoint: .bottom)
-        }
+        // A solid near-opaque fill instead of `.ultraThinMaterial`: the gradient above it already sat
+        // at ~0.9 alpha, so the live backdrop blur was barely visible yet re-composited the whole
+        // desktop behind this floating panel every frame. Dropping it removes that standing GPU cost.
+        LinearGradient(colors: [Color(red: 0.08, green: 0.09, blue: 0.13),
+                                Color(red: 0.035, green: 0.035, blue: 0.065)],
+                       startPoint: .top, endPoint: .bottom)
     }
 
     private var header: some View {

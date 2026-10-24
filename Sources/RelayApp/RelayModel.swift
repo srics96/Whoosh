@@ -71,7 +71,11 @@ final class RelayModel: ObservableObject {
     var visibleNativeThreads: [NativeThread] {
         let query = nativeSearch.trimmingCharacters(in: .whitespacesAndNewlines)
         let fixtures = Set(UserDefaults.standard.stringArray(forKey: "blinkOwnedFixtureIDs") ?? [])
-        let rows = nativeThreads.filter { includeOwnedTestChats || !fixtures.contains($0.id) }
+        // Most-recently-active first: the chat you were just in is the newest, so it lands on top
+        // and gets the default highlight — Whoosh "lands" on where you are without reading the window.
+        let rows = nativeThreads
+            .filter { includeOwnedTestChats || !fixtures.contains($0.id) }
+            .sorted { ($0.updatedAt ?? .distantPast) > ($1.updatedAt ?? .distantPast) }
         return query.isEmpty ? rows : rows.filter { $0.title.localizedCaseInsensitiveContains(query) || $0.projectName.localizedCaseInsensitiveContains(query) }
     }
     @Published var nativeRateSummary: [String] = []
