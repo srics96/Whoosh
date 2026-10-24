@@ -162,4 +162,12 @@ Codex adapter), `RelayApp` (SwiftUI/AppKit UI, hotkey, animation), `Resources/Cl
 
 ---
 
-The source code is available on GitHub. The included conversation fixture is synthetic.
+## License
+
+Original Whoosh code and documentation are available under the [MIT License](LICENSE).
+Third-party components retain their own licenses and terms, including Anthropic's
+Claude Agent SDK and the bundled Node.js runtime. See [third-party notices](THIRD_PARTY_NOTICES.md),
+including the outstanding Node license packaging gap. The bundled app is not
+entirely MIT-licensed.
+
+The included conversation fixture is synthetic.
