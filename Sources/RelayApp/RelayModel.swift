@@ -156,17 +156,25 @@ final class RelayModel: ObservableObject {
 
     // MARK: Keyboard-first selection
 
-    /// Keep a valid highlight as the visible rows change (search, new page, swap).
+    /// Keep a valid highlight as the visible rows change. On a fresh open with no query we
+    /// select NOTHING: Whoosh shows the best ordering and lets you choose, rather than
+    /// pre-committing to a chat it can't be sure is the one you're in. The top match is
+    /// auto-highlighted only once you've typed to narrow the list (standard launcher behavior).
     func ensureHighlight() {
         let rows = visibleNativeThreads
         if let id = highlightedID, rows.contains(where: { $0.id == id }) { return }
-        highlightedID = rows.first?.id
+        let hasQuery = !nativeSearch.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        highlightedID = hasQuery ? rows.first?.id : nil
     }
 
     func moveHighlight(_ delta: Int) {
         let rows = visibleNativeThreads
         guard !rows.isEmpty else { return }
-        let current = rows.firstIndex { $0.id == highlightedID } ?? 0
+        // First arrow press from a clean open selects the top row; thereafter it moves.
+        guard let id = highlightedID, let current = rows.firstIndex(where: { $0.id == id }) else {
+            highlightedID = rows.first?.id
+            return
+        }
         highlightedID = rows[max(0, min(rows.count - 1, current + delta))].id
     }
 

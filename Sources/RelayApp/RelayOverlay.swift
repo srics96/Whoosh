@@ -256,8 +256,9 @@ struct RelayOverlay: View {
         HStack(spacing: 18) {
             if flying { key("esc", "Close") }
             else {
-                key("↵", model.isFreshSession ? "Fresh \(model.source.displayName) session" : "Send to " + model.destination.displayName)
-                key("⇥", model.isFreshSession ? "Switch tool" : "Keep in " + model.source.displayName)
+                key("↑↓", "Pick")
+                key("↵", model.isFreshSession ? "Fresh session" : "Send")
+                key("⇥", model.isFreshSession ? "Switch tool" : "Keep here")
                 key("esc", "Close")
             }
             Spacer()
