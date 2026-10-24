@@ -1,4 +1,5 @@
 import Foundation
+import RelayCore
 
 struct ClaudeSessionInfo: Decodable, Sendable {
     let sessionId: String
@@ -18,11 +19,19 @@ struct ClaudeAdapterResponse: Decodable, Sendable {
     let digest: [ClaudeDigestMessage]?
 }
 struct ClaudeSessionAdapter: Sendable {
-    var available: Bool { Bundle.main.url(forResource: "runtime", withExtension: "json", subdirectory: "ClaudeAdapter") != nil }
+    // Injectable only for local synthetic tests; production always uses bundled resources.
+    var resourceDirectory: URL? = Bundle.main.resourceURL?.appendingPathComponent("ClaudeAdapter")
+    var available: Bool {
+        guard let resourceDirectory else { return false }
+        return FileManager.default.fileExists(atPath: resourceDirectory.appendingPathComponent("runtime.json").path)
+    }
     func call(action: String, id: String? = nil, dir: String? = nil, offset: Int = 0) async throws -> ClaudeAdapterResponse {
-        guard let resource = Bundle.main.url(forResource: "adapter", withExtension: "mjs", subdirectory: "ClaudeAdapter"),
-              let configURL = Bundle.main.url(forResource: "runtime", withExtension: "json", subdirectory: "ClaudeAdapter"),
-              let config = try JSONSerialization.jsonObject(with: Data(contentsOf: configURL)) as? [String:String],
+        guard let resourceDirectory else {
+            throw RelayError.invalidInput("Local Claude Code connection is not installed in this build.")
+        }
+        let resource = resourceDirectory.appendingPathComponent("adapter.mjs")
+        let configURL = resourceDirectory.appendingPathComponent("runtime.json")
+        guard let config = try JSONSerialization.jsonObject(with: Data(contentsOf: configURL)) as? [String:String],
               let configuredNode = config["node"]
         else { throw NSError(domain: "Whoosh", code: 1, userInfo: [NSLocalizedDescriptionKey: "Local Claude Code connection is not installed in this build."]) }
         // An absolute path is a developer machine's own Node; a relative path is a Node runtime bundled
@@ -35,7 +44,7 @@ struct ClaudeSessionAdapter: Sendable {
         var request: [String:Any] = ["action":action,"offset":offset]
         request["id"] = id; request["dir"] = dir
         let input = try JSONSerialization.data(withJSONObject: request)
-        return try await Task.detached {
+        return try await CancellableWork.run {
             let process = Process()
             let directory = FileManager.default.temporaryDirectory.appendingPathComponent("Whoosh-Claude-" + UUID().uuidString)
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
@@ -55,23 +64,23 @@ struct ClaudeSessionAdapter: Sendable {
             defer { try? diagnosticHandle.close() }
             process.standardError = diagnosticHandle
             try process.run()
-            let deadline = Date().addingTimeInterval(180)
-            while process.isRunning && Date() < deadline { try await Task.sleep(nanoseconds: 50_000_000) }
-            if process.isRunning {
-                process.terminate()
-                let phase = ((try? String(contentsOf: diagnostic)) ?? "").components(separatedBy: "\n").filter { ["BLINK:started", "BLINK:config-loaded", "BLINK:sdk-loaded", "BLINK:read-complete"].contains($0) }.last ?? "before helper startup"
+            do { try await OwnedProcess.waitForExit(process, timeout: 180) }
+            catch is CancellationError { throw CancellationError() }
+            catch {
+                let phase = ((try? String(contentsOf: diagnostic, encoding: .utf8)) ?? "").components(separatedBy: "\n").filter { ["BLINK:started", "BLINK:config-loaded", "BLINK:sdk-loaded", "BLINK:read-complete"].contains($0) }.last ?? "before helper startup"
                 throw NSError(domain:"Whoosh",code:3,userInfo:[NSLocalizedDescriptionKey:"Claude connection timed out after 180 seconds (\(phase)). No agent was started."])
             }
             guard process.terminationStatus == 0 else {
                 let allowed = ["Session identity mismatch", "Project mismatch", "Source changed; stop it and select again", "No readable messages", "Unstable pagination", "History exceeds safe capture size", "Invalid session", "Unsupported operation", "Reader unavailable"]
-                let diagnosticText = (try? String(contentsOf: diagnostic)) ?? ""
+                let diagnosticText = (try? String(contentsOf: diagnostic, encoding: .utf8)) ?? ""
                 let reason = allowed.first { diagnosticText.contains("BLINK:error:" + $0) } ?? "Reader unavailable"
                 throw NSError(domain:"Whoosh",code:2,userInfo:[NSLocalizedDescriptionKey:"Claude Code: \(reason). No agent was started."])
             }
             let size = try output.resourceValues(forKeys:[.fileSizeKey]).fileSize ?? 0
             guard size <= 256*1024*1024 else { throw NSError(domain:"Whoosh",code:4,userInfo:[NSLocalizedDescriptionKey:"Claude history exceeds the capture limit."]) }
+            try Task.checkCancellation()
             let data = try Data(contentsOf: output)
             return try JSONDecoder().decode(ClaudeAdapterResponse.self, from: data)
-        }.value
+        }
     }
 }

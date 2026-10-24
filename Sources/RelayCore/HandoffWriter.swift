@@ -4,6 +4,7 @@ public enum HandoffWriter {
     public static func prepare(conversation: ImportedConversation, checkpoint: Checkpoint,
                                projectURL: URL, outputParent: URL,
                                gitSnapshot: GitSnapshot, brief: String = "") throws -> PreparedHandoff {
+        try Task.checkCancellation()
         try checkpoint.validate()
         let fm = FileManager.default
         for folder in [projectURL, outputParent] {
@@ -37,6 +38,7 @@ public enum HandoffWriter {
             bootstrapUTF16Count: bootstrap.utf16.count, nativeConversationImported: false,
             destinationReadVerified: false, liveQuota: "Unknown. No live quota data is used for this handoff."
         )
+        try Task.checkCancellation()
         try fm.createDirectory(at: directory, withIntermediateDirectories: false,
                                attributes: [.posixPermissions: NSNumber(value: 0o700)])
         do {
@@ -46,7 +48,7 @@ public enum HandoffWriter {
             let archive = directory.appendingPathComponent(relativeArchive)
             try writePrivate(conversation.data, to: archive)
             let reread = try Data(contentsOf: archive)
-            guard reread == conversation.data, SHA256.hexDigest(reread) == conversation.sha256 else {
+            guard reread == conversation.data, try SHA256.hexDigestCheckingCancellation(reread) == conversation.sha256 else {
                 throw RelayError.archiveMismatch
             }
             let encoder = JSONEncoder()
@@ -73,6 +75,7 @@ public enum HandoffWriter {
             }
             // Do not export a prompt-bearing URL until prefill-only behavior is verified.
             try writePrivate(Data(readme.utf8), to: directory.appendingPathComponent("README.txt"))
+            try Task.checkCancellation()
             return PreparedHandoff(directory: directory, bootstrap: bootstrap, deepLink: deepLink, manifest: manifest)
         } catch {
             // Remove only the newly created package; never touch an existing folder or source file.
@@ -82,6 +85,7 @@ public enum HandoffWriter {
     }
 
     private static func writePrivate(_ bytes: Data, to destination: URL) throws {
+        try Task.checkCancellation()
         // The parent is private from creation. Setting each file mode makes privacy independent of umask.
         try bytes.write(to: destination, options: [.withoutOverwriting])
         try FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o600)], ofItemAtPath: destination.path)

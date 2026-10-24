@@ -22,6 +22,12 @@ conventions, captured transcript, and tracked uncommitted diff when available.
 You review the draft and press Send; the prompt asks the destination agent to read
 those files.
 
+The picker labels **From** (whose history you read) and **To** (where the new draft
+opens). For **Codex → Claude**, choose **From: Codex**, then **To: Claude Code**
+or press **Tab**. Changing **From** resets **To** to a new session of that source.
+**Escape** cancels reading/preparation, including Whoosh-owned read helpers;
+it never stops your existing Claude or Codex session.
+
 Two moves, one hotkey:
 
 - **Fresh session** — your chat has gotten long and the model is drifting? Whoosh it

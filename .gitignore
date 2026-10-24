@@ -15,3 +15,6 @@ Relay-*/
 dist-next/
 node_modules/
 Resources/ClaudeAdapter/runtime.json
+
+# Local direct-compiler regression builds
+.build-audit/

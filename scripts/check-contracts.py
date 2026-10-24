@@ -51,7 +51,7 @@ class PortableContracts(unittest.TestCase):
             self.assertEqual(hashlib.sha256(archive.read_bytes()).hexdigest(), hashlib.sha256(original).hexdigest())
         code = (ROOT / "Sources/RelayCore/HandoffWriter.swift").read_text()
         self.assertIn("reread == conversation.data", code)
-        self.assertIn("SHA256.hexDigest(reread) == conversation.sha256", code)
+        self.assertIn("SHA256.hexDigestCheckingCancellation(reread) == conversation.sha256", code)
         self.assertIn("0o700", code)
         self.assertIn("0o600", code)
         self.assertNotIn("[.atomic, .withoutOverwriting]", code)

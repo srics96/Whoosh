@@ -68,7 +68,7 @@ public struct ImportedConversation: Sendable {
         }
         self.fileName = URL(fileURLWithPath: fileName).lastPathComponent
         self.data = data
-        self.sha256 = SHA256.hexDigest(data)
+        self.sha256 = try SHA256.hexDigestCheckingCancellation(data)
         self.preservationNotice = preservationNotice
         self.isPartial = isPartial
     }

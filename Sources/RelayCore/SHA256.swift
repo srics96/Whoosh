@@ -16,6 +16,14 @@ public enum SHA256 {
         (value >> amount) | (value << (32 - amount))
     }
     public static func hexDigest(_ data: Data) -> String {
+        // This overload preserves the original synchronous API.
+        try! digest(data, cancellable: false)
+    }
+    public static func hexDigestCheckingCancellation(_ data: Data) throws -> String {
+        try digest(data, cancellable: true)
+    }
+    private static func digest(_ data: Data, cancellable: Bool) throws -> String {
+        if cancellable { try Task.checkCancellation() }
         var bytes = [UInt8](data)
         let bitLength = UInt64(bytes.count) * 8
         bytes.append(0x80)
@@ -23,6 +31,7 @@ public enum SHA256 {
         bytes += (0..<8).reversed().map { UInt8(truncatingIfNeeded: bitLength >> ($0 * 8)) }
         var hash: [UInt32] = [0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19]
         for offset in stride(from: 0, to: bytes.count, by: 64) {
+            if cancellable && offset % 65_536 == 0 { try Task.checkCancellation() }
             var words = [UInt32](repeating: 0, count: 64)
             for index in 0..<16 {
                 let i = offset + index * 4

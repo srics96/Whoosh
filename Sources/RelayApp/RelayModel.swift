@@ -60,7 +60,7 @@ final class RelayModel: ObservableObject {
     @Published var shortcutActivationCount = 0
     @Published var shortcutDiagnostic = "Not registered"
     @Published var reduceMotionInWhoosh = false
-    @Published var rememberedCLIPath = CodexInstallation.detect()?.path
+    @Published var rememberedCLIPath: String?
     @Published var nativeStatusNotice: String?
     @Published var sensitiveContentBlocked = false
     @Published var sourceIdleKnown = false
@@ -95,17 +95,23 @@ final class RelayModel: ObservableObject {
     private var resumeBrief = ""
     private var hasExplicitSource = false
     private var autoConnectionAttempted = false
-    private var nativeProvider = CodexNativeSourceProvider()
+    private var nativeProvider: CodexNativeSourceProvider
     private var selectedNativeResult: CodexSelectedThread?
     private var nativeSelectionTask: Task<Void, Never>?
-    var canCancelSourceRead: Bool { nativeSelectionTask != nil && nativeBusy }
-    private let claudeAdapter = ClaudeSessionAdapter()
+    var canCancelSourceRead: Bool { nativeSelectionTask != nil && (nativeBusy || importBusy) }
+    private let claudeAdapter: ClaudeSessionAdapter
     private var selectedClaudeInfo: ClaudeSessionInfo?
     var claudeAdapterAvailable: Bool { claudeAdapter.available }
 
+    init(nativeProvider: CodexNativeSourceProvider = CodexNativeSourceProvider(),
+         claudeAdapter: ClaudeSessionAdapter = ClaudeSessionAdapter()) {
+        self.nativeProvider = nativeProvider
+        self.claudeAdapter = claudeAdapter
+    }
+
     var isBusy: Bool { stage == .preparing || stage == .departing || stage == .opening || nativeBusy || importBusy }
     var canPrepare: Bool {
-        conversation != nil && projectURL != nil && outputURL != nil &&
+        conversation != nil && !sensitiveContentBlocked && projectURL != nil && outputURL != nil &&
         !goal.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
         !nextStep.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isBusy
     }
@@ -241,16 +247,17 @@ final class RelayModel: ObservableObject {
         guard panel.runModal() == .OK, let url = panel.url else { return }
         invalidate()
         importBusy = true
-        Task {
-            defer { importBusy = false }
+        nativeSelectionTask = Task {
+            defer { importBusy = false; nativeSelectionTask = nil }
             do {
-                let value = try await Task.detached(priority: .userInitiated) {
-                    try ImportedConversation.readSelectedFile(url)
-                }.value
+                let (value, blocked) = try await CancellableWork.run {
+                    let value = try ImportedConversation.readSelectedFile(url)
+                    return (value, try SensitiveContentScreen.scan(value.data))
+                }
                 clearConversation()
                 conversation = value
                 setAutomaticCheckpoint(title: value.fileName)
-                sensitiveContentBlocked = SensitiveContentScreen.requiresRedaction(value.data)
+                sensitiveContentBlocked = blocked
                 conversationNotice = "Exact selected-file bytes. This preserves your export, not a native conversation ID or hidden tool state."
             } catch { errorMessage = error.localizedDescription }
         }
@@ -278,10 +285,7 @@ final class RelayModel: ObservableObject {
         guard canPrepare, let conversation, let projectURL, let outputURL else { return }
         let checkpoint = Checkpoint(sourceName: source.rawValue, goal: goal, decisions: decisions,
                                     nextStep: userInstruction.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nextStep : userInstruction, verification: verification, sourceSessionStopped: true)
-        guard !SensitiveContentScreen.requiresRedaction(Data((goal + nextStep + userInstruction + decisions + verification).utf8)) else {
-            errorMessage = "Possible sensitive data in your instructions. Remove it before continuing."
-            return
-        }
+        let instructionData = Data((goal + nextStep + userInstruction + decisions + verification).utf8)
         let captureDiff = includeDiff
         let brief = resumeBrief
         errorMessage = nil
@@ -290,17 +294,19 @@ final class RelayModel: ObservableObject {
         phase = .snapshot
         handoffTask = Task {
             do {
-                // The chosen conversation was just read, so Whoosh uses that capture directly and
-                // keeps the handoff instant. Integrity of the archived bytes is still SHA-256 checked.
-                try PrivateHandoffStorage.ensureDirectory(outputURL)
-                let snapshot = await Task.detached(priority: .userInitiated) {
-                    GitSnapshotReader.capture(projectURL: projectURL, includeDiff: captureDiff)
-                }.value
+                // Reuse the selected capture; check archive integrity before opening a destination.
+                let snapshot = try await CancellableWork.run {
+                    guard try !SensitiveContentScreen.scan(instructionData) else {
+                        throw RelayError.invalidInput("Possible sensitive data in your instructions. Remove it before continuing.")
+                    }
+                    try PrivateHandoffStorage.ensureDirectory(outputURL)
+                    return GitSnapshotReader.capture(projectURL: projectURL, includeDiff: captureDiff)
+                }
                 phase = .archive
-                let result = try await Task.detached(priority: .userInitiated) {
+                let result = try await CancellableWork.run {
                     try HandoffWriter.prepare(conversation: conversation, checkpoint: checkpoint,
                                               projectURL: projectURL, outputParent: outputURL, gitSnapshot: snapshot, brief: brief)
-                }.value
+                }
                 try Task.checkCancellation()
                 prepared = result
                 refreshDestinationCapabilities()
@@ -490,50 +496,64 @@ final class RelayModel: ObservableObject {
         panel.allowsMultipleSelection = false
         panel.prompt = "Connect read-only"
         guard panel.runModal() == .OK, let executable = panel.url else { return }
-        guard let verified = CodexInstallation.verified(executable) else {
-            errorMessage = "This executable could not be verified as signed by OpenAI. No program was run."
-            return
-        }
-        connectNativeCodex(executable: verified)
+        connectNativeCodex(executable: executable)
     }
 
     func reconnectNativeCodex() {
         guard !isBusy else { return }
         if source == .claude { connectClaude(); return }
-        guard let executable = CodexInstallation.detect() else {
-            rememberedCLIPath = nil
-            errorMessage = "Couldn’t find Codex. Install the Codex app (or the Codex CLI) on this Mac, then try again — or pick it manually in Options → Locate Codex helper."
-            return
+        nativeConnected = false
+        nativeBusy = true
+        errorMessage = nil
+        nativeSelectionTask = Task {
+            defer { nativeBusy = false; nativeSelectionTask = nil }
+            do {
+                guard let executable = try await CancellableWork.run({ CodexInstallation.detect() }) else {
+                    rememberedCLIPath = nil
+                    throw RelayError.invalidInput("Couldn’t find Codex. Install the Codex app (or CLI), or choose Options → Locate Codex helper.")
+                }
+                try await readCodexConnection(executable: executable)
+            } catch { errorMessage = error is CancellationError ? "Connection cancelled. Reopen to try again." : error.localizedDescription; autoConnectionAttempted = false }
         }
-        connectNativeCodex(executable: executable)
     }
 
     private func connectNativeCodex(executable: URL) {
+        nativeConnected = false
         nativeBusy = true
         errorMessage = nil
-        Task {
+        nativeSelectionTask = Task {
+            defer { nativeBusy = false; nativeSelectionTask = nil }
             do {
-                _ = try await nativeProvider.connect(executableURL: executable, userApproved: true)
-                rememberedCLIPath = executable.path
-                UserDefaults.standard.set(executable.path, forKey: "blinkChosenCLI")
-                UserDefaults.standard.set(true, forKey: "blinkCodexConnectionApproved")
-                nativeConnected = true
-                nativeNotice = "Connected to your chosen local Codex CLI. This is not your desktop app’s selected conversation."
-                let page = try await nativeProvider.listThreads()
-                applyNativePage(page, append: false)
-            } catch { errorMessage = error.localizedDescription }
-            nativeBusy = false
+                guard let verified = try await CancellableWork.run({ CodexInstallation.verified(executable) }) else {
+                    throw RelayError.invalidInput("This executable could not be verified as signed by OpenAI. No program was run.")
+                }
+                try await readCodexConnection(executable: verified)
+            }
+            catch { errorMessage = error is CancellationError ? "Connection cancelled." : error.localizedDescription; autoConnectionAttempted = false }
         }
+    }
+
+    private func readCodexConnection(executable: URL) async throws {
+        _ = try await nativeProvider.connect(executableURL: executable, userApproved: true)
+        try Task.checkCancellation()
+        rememberedCLIPath = executable.path
+        UserDefaults.standard.set(executable.path, forKey: "blinkChosenCLI")
+        UserDefaults.standard.set(true, forKey: "blinkCodexConnectionApproved")
+        let page = try await nativeProvider.listThreads()
+        try Task.checkCancellation()
+        applyNativePage(page, append: false)
+        nativeConnected = true
+        nativeNotice = "Connected to your chosen local Codex CLI. This is not your desktop app’s selected conversation."
     }
 
     func loadMoreNativeThreads() {
         if source == .claude { connectClaude(offset: Int(nativeNextCursor ?? "0") ?? 0); return }
         guard nativeConnected, !nativeBusy, let cursor = nativeNextCursor else { return }
         nativeBusy = true
-        Task {
+        nativeSelectionTask = Task {
+            defer { nativeBusy = false; nativeSelectionTask = nil }
             do { applyNativePage(try await nativeProvider.listThreads(cursor: cursor), append: true) }
-            catch { errorMessage = error.localizedDescription }
-            nativeBusy = false
+            catch { if error is CancellationError { nativeConnected = false; autoConnectionAttempted = false }; errorMessage = error.localizedDescription }
         }
     }
 
@@ -559,8 +579,13 @@ final class RelayModel: ObservableObject {
             do {
                 let result = try await nativeProvider.readThread(id: id)
                 try Task.checkCancellation()
-                let archive = try ImportedConversation(fileName: "codex-selected-responses.jsonl", data: result.rawResponsesJSONL,
-                                                       preservationNotice: result.preservationNotice, isPartial: result.isPartial)
+                let (archive, digest, blocked) = try await CancellableWork.run {
+                    let archive = try ImportedConversation(fileName: "codex-selected-responses.jsonl", data: result.rawResponsesJSONL,
+                                                           preservationNotice: result.preservationNotice, isPartial: result.isPartial)
+                    let digest = ResumeDigest(title: result.summary.displayName,
+                        messages: result.messages.map { ResumeMessage(role: $0.role.rawValue, text: $0.text) })
+                    return (archive, digest, try SensitiveContentScreen.scan(archive.data))
+                }
                 clearConversation()
                 selectingThread = nativeThreads.first { $0.id == id }
                 selectedNativeResult = result
@@ -571,9 +596,8 @@ final class RelayModel: ObservableObject {
                     projectURL = URL(fileURLWithPath: cwd)
                 }
                 if projectURL == nil { projectURL = FileManager.default.homeDirectoryForCurrentUser }
-                setAutomaticCheckpoint(ResumeDigest(title: result.summary.displayName,
-                    messages: result.messages.map { ResumeMessage(role: $0.role.rawValue, text: $0.text) }))
-                sensitiveContentBlocked = SensitiveContentScreen.requiresRedaction(archive.data)
+                setAutomaticCheckpoint(digest)
+                sensitiveContentBlocked = blocked
                 sourceIdleKnown = result.summary.status?.type == "idle"
                 sourceStopped = true
                 conversationNotice = result.preservationNotice + (result.isPartial ? " This result is partial. Export your full conversation if you need complete context." : "")
@@ -583,7 +607,8 @@ final class RelayModel: ObservableObject {
                 errorMessage = "Full history exceeds the 240 MiB capture budget. No continuation was prepared. Use a complete explicit export or reduce source attachments."
             } catch is CancellationError {
                 nativeConnected = false
-                errorMessage = "History capture cancelled. Reconnect to choose a chat."
+                autoConnectionAttempted = false
+                errorMessage = "History capture cancelled. Reopen to choose a chat."
             } catch {
                 nativeConnected = false
                 errorMessage = error.localizedDescription
@@ -591,56 +616,67 @@ final class RelayModel: ObservableObject {
             nativeBusy = false
             nativeSelectionTask = nil
             let fly = autoFly; autoFly = false
-            if ok && fly { continueHandoff() }
+            if ok && sensitiveContentBlocked {
+                errorMessage = "Possible sensitive data found. Review and redact the history before continuing."
+            } else if ok && fly { continueHandoff() }
         }
     }
 
     func cancelSourceRead() {
+        autoFly = false
         nativeSelectionTask?.cancel()
     }
 
     private func connectClaude(offset: Int = 0) {
         guard !nativeBusy else { return }
         nativeBusy = true; errorMessage = nil
-        Task {
+        nativeSelectionTask = Task {
+            defer { nativeBusy = false; nativeSelectionTask = nil }
             do {
                 let result = try await claudeAdapter.call(action: "list", offset: offset)
+                try Task.checkCancellation()
                 let rows = (result.sessions ?? []).map { NativeThread(id:$0.sessionId, title:$0.summary, preview:"", directory:$0.cwd, updatedAt:Date(timeIntervalSince1970:$0.lastModified / 1000)) }
                 if offset == 0 { nativeThreads = rows } else { nativeThreads += rows.filter { row in !nativeThreads.contains { $0.id == row.id } } }
                 nativeNextCursor = result.nextOffset.map(String.init)
                 nativeConnected = true
                 UserDefaults.standard.set(true, forKey: "blinkClaudeConnectionApproved")
                 nativeNotice = "Local Claude Code histories only. Chat/Cowork and desktop-origin coverage are not established."
-            } catch { errorMessage = error.localizedDescription }
-            nativeBusy = false
+            } catch { errorMessage = error is CancellationError ? "Connection cancelled." : error.localizedDescription; autoConnectionAttempted = false }
         }
     }
 
     private func selectClaude(_ id: String) {
         guard nativeConnected, !nativeBusy, let row = nativeThreads.first(where: { $0.id == id }) else { return }
         invalidate(); clearConversation(); selectingThread = row; nativeBusy = true
-        Task {
+        nativeSelectionTask = Task {
             var ok = false
             do {
                 let result = try await claudeAdapter.call(action: "read", id: id, dir: row.directory)
                 guard let info = result.info, let text = result.archive, let notice = result.notice else {
                     throw RelayError.invalidInput("No readable Claude Code history returned.")
                 }
-                let archive = try ImportedConversation(fileName:"claude-code-api.jsonl", data:Data(text.utf8), preservationNotice:notice, isPartial:true)
+                let (archive, digest, blocked) = try await CancellableWork.run {
+                    let archive = try ImportedConversation(fileName:"claude-code-api.jsonl", data:Data(text.utf8), preservationNotice:notice, isPartial:true)
+                    let digest = ResumeDigest(title: info.summary,
+                        messages: (result.digest ?? []).map { ResumeMessage(role: $0.role, text: $0.text) })
+                    return (archive, digest, try SensitiveContentScreen.scan(archive.data))
+                }
                 clearConversation(); selectingThread = row; selectedClaudeInfo = info; nativeSelectedID = id; conversation = archive
                 if let cwd = info.cwd, (cwd as NSString).isAbsolutePath,
                    (try? URL(fileURLWithPath:cwd).resourceValues(forKeys:[.isDirectoryKey]).isDirectory) == true { projectURL = URL(fileURLWithPath:cwd) }
                 if projectURL == nil { projectURL = FileManager.default.homeDirectoryForCurrentUser }
-                setAutomaticCheckpoint(ResumeDigest(title: info.summary,
-                    messages: (result.digest ?? []).map { ResumeMessage(role: $0.role, text: $0.text) }))
-                sensitiveContentBlocked = SensitiveContentScreen.requiresRedaction(archive.data)
+                setAutomaticCheckpoint(digest)
+                sensitiveContentBlocked = blocked
                 sourceIdleKnown = false; sourceStopped = true
                 conversationNotice = notice
                 ok = true
-            } catch { errorMessage = error.localizedDescription }
+            } catch { errorMessage = error is CancellationError ? "History capture cancelled." : error.localizedDescription }
             nativeBusy = false
+            nativeSelectionTask = nil
             let fly = autoFly; autoFly = false
-            if ok && fly { continueHandoff() }
+            if ok && sensitiveContentBlocked {
+                errorMessage = "Possible sensitive data found. Review and redact the history before continuing."
+            } else if ok && fly { continueHandoff() }
         }
     }
 
@@ -659,9 +695,11 @@ final class RelayModel: ObservableObject {
     func readNativeUsage() {
         guard nativeConnected, !nativeBusy else { return }
         nativeBusy = true
-        Task {
+        nativeSelectionTask = Task {
+            defer { nativeBusy = false; nativeSelectionTask = nil }
             do {
                 let snapshot = try await nativeProvider.readRateLimits()
+                try Task.checkCancellation()
                 nativeRateCheckedAt = snapshot.capturedAt
                 nativeRateSummary = snapshot.buckets.flatMap { bucket -> [String] in
                     let title = bucket.limitName ?? bucket.limitId ?? "Codex"
@@ -673,13 +711,18 @@ final class RelayModel: ObservableObject {
                     }
                 }
                 if nativeRateSummary.isEmpty { nativeRateSummary = ["This account did not return usage windows."] }
-            } catch { errorMessage = error.localizedDescription }
-            nativeBusy = false
+            } catch { if error is CancellationError { nativeConnected = false; autoConnectionAttempted = false }; errorMessage = error.localizedDescription }
         }
     }
 
     func shutdown() async {
+        let selection = nativeSelectionTask
+        let handoff = handoffTask
+        cancelSourceRead()
+        handoff?.cancel()
         await nativeProvider.disconnect()
+        await selection?.value
+        await handoff?.value
     }
 
     func disconnectNativeCodex() {

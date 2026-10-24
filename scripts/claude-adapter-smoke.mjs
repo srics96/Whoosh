@@ -31,9 +31,9 @@ await assert.rejects(handle({...actual,getSessionMessages:async()=>[]},{action:'
 console.log('PASS empty history rejected');
 const long={...actual,getSessionMessages:async(_id,o)=>Array.from({length:100},(_,i)=>({uuid:'item-'+(o.offset+i),type:'user',message:{content:'synthetic'}}))};
 const capped=JSON.parse((await handle(long,{action:'read',id,dir})).archive);
-assert.equal(capped.messages.length,10000);assert.equal(capped.apiChainExhausted,false);
-console.log('PASS long history stops at 10000 messages with explicit incomplete chain');
-await assert.rejects(handle({...actual,getSessionMessages:async()=>[{uuid:'large',message:'x'.repeat(33*1024*1024)}]},{action:'read',id,dir}),/capture size/);
+assert.equal(capped.messages.length,200000);assert.equal(capped.apiChainExhausted,false);
+console.log('PASS long history stops at 200000 messages with explicit incomplete chain');
+await assert.rejects(handle({...actual,getSessionMessages:async()=>[{uuid:'large',message:'x'.repeat(241*1024*1024)}]},{action:'read',id,dir}),/capture size/);
 console.log('PASS oversized history rejected before transfer');
 const unicode={...actual,getSessionInfo:async()=>({...await actual.getSessionInfo(id,{dir}),cwd:'/tmp/caf\u00e9'})};
 assert.ok((await handle(unicode,{action:'read',id,dir:'/tmp/cafe\u0301'})).archive);

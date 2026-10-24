@@ -68,6 +68,7 @@ public enum GitSnapshotReader {
     }
 
     private static func command(_ args: [String], in folder: URL) throws -> String {
+        try Task.checkCancellation()
         let result = try BoundedGitProcess.run(
             executable: URL(fileURLWithPath: "/usr/bin/git"),
             arguments: arguments(for: args, projectURL: folder),
@@ -141,16 +142,16 @@ private enum BoundedGitProcess {
         DispatchQueue.global(qos: .utility).async { stdout.consume(out.fileHandleForReading); readers.leave() }
         readers.enter()
         DispatchQueue.global(qos: .utility).async { stderr.consume(err.fileHandleForReading); readers.leave() }
-        if done.wait(timeout: .now() + timeout) == .timedOut {
-            process.terminate()
-            if done.wait(timeout: .now() + 0.5) == .timedOut {
-                #if canImport(Darwin) || canImport(Glibc)
-                _ = kill(process.processIdentifier, SIGKILL)
-                #endif
-                _ = done.wait(timeout: .now() + 1)
+        let deadline = ProcessInfo.processInfo.systemUptime + timeout
+        while done.wait(timeout: .now() + 0.02) == .timedOut {
+            if Task.isCancelled || ProcessInfo.processInfo.systemUptime >= deadline {
+                OwnedProcess.stopAndWait(process)
+                _ = readers.wait(timeout: .now() + 1)
+                try Task.checkCancellation()
+                throw RelayError.processFailed("Git exceeded the 8-second read timeout")
             }
-            throw RelayError.processFailed("Git exceeded the 8-second read timeout")
         }
+        try Task.checkCancellation()
         guard readers.wait(timeout: .now() + 1) == .success else {
             throw RelayError.processFailed("Git output did not close cleanly")
         }

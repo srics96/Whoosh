@@ -59,7 +59,22 @@ struct RelayOverlay: View {
     private var header: some View {
         HStack(spacing: 12) {
             WhooshMark(active: flying).frame(width: 22, height: 20)
-            destinationPicker
+            VStack(alignment: .leading, spacing: 8) {
+                Menu {
+                    ForEach(RelayModel.AgentApp.allCases) { source in
+                        Button("Read \(source.displayName) chats") { model.chooseSource(source) }
+                    }
+                } label: {
+                    Text("From: \(model.source.displayName)").font(.system(size: 13, weight: .semibold))
+                }
+                .menuStyle(.borderlessButton).fixedSize().disabled(flying)
+                .accessibilityLabel("Source: \(model.source.displayName)")
+                .help("Choose which app’s conversation history to read. Changing source resets the destination to that app.")
+                HStack(spacing: 8) {
+                    Text("To:").font(.system(size: 13, weight: .semibold))
+                    destinationPicker
+                }
+            }
             Spacer()
             Menu {
                 Button(model.isFreshSession ? "Send to \(model.source.other.displayName) instead" : "Keep it in \(model.source.displayName) (fresh session)") { model.swapApps() }.disabled(flying)
@@ -99,7 +114,7 @@ struct RelayOverlay: View {
         Button { model.destination = fresh ? model.source : model.source.other } label: {
             HStack(spacing: 6) {
                 providerIcon(fresh ? model.source : model.source.other, 15)
-                Text(fresh ? "Fresh session" : model.source.other.displayName).font(.system(size: 12.5, weight: .semibold))
+                Text(fresh ? "\(model.source.displayName) · new session" : model.source.other.displayName).font(.system(size: 12.5, weight: .semibold))
             }
             .padding(.horizontal, 11).padding(.vertical, 6)
             .foregroundStyle(selected ? .white : .white.opacity(0.5))
@@ -108,6 +123,8 @@ struct RelayOverlay: View {
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
+        .accessibilityLabel("Destination: \((fresh ? model.source : model.source.other).displayName), new draft")
+        .accessibilityValue(selected ? "Selected" : "Not selected")
     }
 
     private var searchBar: some View {
@@ -266,7 +283,7 @@ struct RelayOverlay: View {
             if flying { key("esc", "Close") }
             else {
                 key("↑↓", "Pick")
-                key("↵", "Send")
+                key("↵", "Prepare draft")
                 key("Tab", "Switch target")
                 key("esc", "Close")
             }
@@ -332,7 +349,7 @@ private struct ConversationRow: View {
             Spacer(minLength: 8)
             if highlighted {
                 HStack(spacing: 5) {
-                    Text("Send").font(.system(size: 11, weight: .semibold))
+                    Text("Draft").font(.system(size: 11, weight: .semibold))
                     Image(systemName: "arrow.turn.down.left").font(.system(size: 10, weight: .bold))
                 }
                 .foregroundStyle(WhooshGeometry.teal)

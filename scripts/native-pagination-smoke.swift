@@ -62,7 +62,7 @@ actor Fixture: CodexReadOnlyRPCTransport {
  do { _ = try await work.value } catch is CancellationError { cancelled = true }
  assert(cancelled && Date().timeIntervalSince(cancelStarted) < 1); print("PASS: cancellation interrupts an in-flight page read")
 
- let oversizedPage = "{\"data\":[],\"padding\":\"" + String(repeating:"x",count:32*1024*1024) + "\",\"nextCursor\":null}"
+ let oversizedPage = "{\"data\":[],\"padding\":\"" + String(repeating:"x",count:241*1024*1024) + "\",\"nextCursor\":null}"
  let largeMock = try Fixture(prefix + [oversizedPage]);let largeProvider = CodexNativeSourceProvider(transport:largeMock)
  _ = try await largeProvider.connect(executableURL:URL(fileURLWithPath:"/synthetic"),userApproved:true);_ = try await largeProvider.listThreads()
  var tooLarge = false

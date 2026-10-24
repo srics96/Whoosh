@@ -39,7 +39,8 @@ public actor CodexStdioTransport: CodexReadOnlyRPCTransport {
         let probe = Task { try await CodexCLIProbe.verify(executableURL) }
         probeTask = probe
         let version: String
-        do { version = try await probe.value }
+        do { version = try await withTaskCancellationHandler(operation: { try await probe.value },
+                                                            onCancel: { probe.cancel() }) }
         catch { if session == connection { probeTask = nil }; throw error }
         guard session == connection else { throw CodexSourceError.disconnected }
         probeTask = nil
