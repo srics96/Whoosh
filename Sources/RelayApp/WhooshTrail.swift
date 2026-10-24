@@ -12,8 +12,8 @@ struct WhooshTrail: View {
     /// A handoff is near-instant, so the shimmer only needs to run briefly. Capping it means a
     /// hung handoff (stage stuck "in flight") can never peg a core with an endless redraw loop.
     private static let maxAnimationSeconds: UInt64 = 6
-    private let mint = WhooshGeometry.mint
-    private let amber = WhooshGeometry.amber
+    private let teal = WhooshGeometry.teal
+    private let blue = WhooshGeometry.blue
 
     private func bezier(_ p0: CGPoint, _ c1: CGPoint, _ c2: CGPoint, _ p3: CGPoint, _ u: CGFloat) -> CGPoint {
         let v = 1 - u
@@ -38,10 +38,10 @@ struct WhooshTrail: View {
                 var path = Path(); path.move(to: start); path.addCurve(to: end, control1: c1, control2: c2)
                 // Fake glow: a wide, faint stroke under the trail — no per-frame Gaussian blur filter,
                 // which is what made this canvas expensive to redraw.
-                ctx.stroke(path, with: .color(amber.opacity(active ? 0.16 : 0.07)), lineWidth: 7)
+                ctx.stroke(path, with: .color(blue.opacity(active ? 0.16 : 0.07)), lineWidth: 7)
                 // the trail line
                 ctx.stroke(path, with: .linearGradient(
-                    Gradient(colors: [mint.opacity(0.15), mint, amber, amber.opacity(0.15)]),
+                    Gradient(colors: [teal.opacity(0.15), teal, blue, blue.opacity(0.15)]),
                     startPoint: start, endPoint: end), lineWidth: 1.4)
 
                 // flowing particles, fading in at the source and out at the destination
@@ -51,7 +51,7 @@ struct WhooshTrail: View {
                     let p = at(u)
                     let fade = sin(u * .pi)
                     let r = (i % 5 == 0 ? 2.6 : 1.3) * (active ? 1 : 0.55)
-                    let color = u < 0.5 ? mint : amber
+                    let color = u < 0.5 ? teal : blue
                     ctx.fill(Path(ellipseIn: CGRect(x: p.x-r, y: p.y-r, width: r*2, height: r*2)),
                              with: .color(color.opacity((active ? 0.9 : 0.4) * fade)))
                 }
@@ -69,8 +69,8 @@ struct WhooshTrail: View {
                 // the comet head racing along — soft edge from two concentric fills, no blur filter
                 if animating {
                     let hp = at(CGFloat((t * 0.55).truncatingRemainder(dividingBy: 1)))
-                    ctx.fill(Path(ellipseIn: CGRect(x: hp.x-7, y: hp.y-7, width: 14, height: 14)), with: .color(amber.opacity(0.35)))
-                    ctx.fill(Path(ellipseIn: CGRect(x: hp.x-4.5, y: hp.y-4.5, width: 9, height: 9)), with: .color(amber.opacity(0.8)))
+                    ctx.fill(Path(ellipseIn: CGRect(x: hp.x-7, y: hp.y-7, width: 14, height: 14)), with: .color(blue.opacity(0.35)))
+                    ctx.fill(Path(ellipseIn: CGRect(x: hp.x-4.5, y: hp.y-4.5, width: 9, height: 9)), with: .color(blue.opacity(0.8)))
                     ctx.fill(Path(ellipseIn: CGRect(x: hp.x-3, y: hp.y-3, width: 6, height: 6)), with: .color(.white))
                 }
 
@@ -79,7 +79,7 @@ struct WhooshTrail: View {
                     let pulse = animating ? (t * 0.45 + Double(i)/3).truncatingRemainder(dividingBy: 1) : Double(i)/3
                     let rad = CGFloat(16 + pulse * 36)
                     ctx.stroke(Path(ellipseIn: CGRect(x: end.x-rad, y: end.y-rad, width: rad*2, height: rad*2)),
-                               with: .color(amber.opacity((1 - pulse) * (active ? 0.32 : 0.1))), lineWidth: 1.4)
+                               with: .color(blue.opacity((1 - pulse) * (active ? 0.32 : 0.1))), lineWidth: 1.4)
                 }
             }
         }
@@ -98,11 +98,11 @@ struct RelayPrimaryButton: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.system(size: 13, weight: .semibold))
-            .foregroundStyle(isEnabled ? Color(red: 0.15, green: 0.10, blue: 0.09) : Color.white.opacity(0.35))
+            .foregroundStyle(isEnabled ? Color(red: 0.04, green: 0.08, blue: 0.14) : Color.white.opacity(0.35))
             .padding(.horizontal, 18).padding(.vertical, 12)
             .frame(maxWidth: .infinity)
             .background(isEnabled
-                        ? LinearGradient(colors: [Color(red: 0.55, green: 0.95, blue: 0.82), Color(red: 1, green: 0.62, blue: 0.45)], startPoint: .topLeading, endPoint: .bottomTrailing)
+                        ? LinearGradient(colors: [WhooshGeometry.teal, WhooshGeometry.blue], startPoint: .topLeading, endPoint: .bottomTrailing)
                         : LinearGradient(colors: [.white.opacity(0.06), .white.opacity(0.06)], startPoint: .top, endPoint: .bottom))
             .clipShape(RoundedRectangle(cornerRadius: 11))
             .overlay(RoundedRectangle(cornerRadius: 11).strokeBorder(.white.opacity(isEnabled ? 0.22 : 0.06)))

@@ -37,7 +37,7 @@ struct RelayOverlay: View {
         .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(Color.white.opacity(0.12), lineWidth: 1))
         .foregroundStyle(.white)
-        .tint(Color(red: 1, green: 0.68, blue: 0.5))
+        .tint(WhooshGeometry.accent)
         .animation(reduced ? nil : .easeInOut(duration: 0.22), value: flying)
         .onAppear { searchFocused = true; model.ensureHighlight() }
         .onChange(of: model.source) { _ in searchFocused = true }
@@ -208,7 +208,7 @@ struct RelayOverlay: View {
                     Spacer()
                     providerIcon(model.destination, 52)
                         .scaleEffect(model.stage == .complete ? 1.12 : (departed ? 1.04 : 0.92))
-                        .shadow(color: Color(red: 1, green: 0.62, blue: 0.45).opacity(departed ? 0.6 : 0), radius: 18)
+                        .shadow(color: WhooshGeometry.blue.opacity(departed ? 0.6 : 0), radius: 18)
                 }
                 .padding(.horizontal, 40)
                 .animation(reduced ? nil : .spring(response: 0.5, dampingFraction: 0.75), value: model.stage)
@@ -281,10 +281,10 @@ struct RelayOverlay: View {
 
     private func banner(_ text: String) -> some View {
         Label(text, systemImage: "exclamationmark.triangle")
-            .font(.system(size: 12)).foregroundStyle(Color(red: 1, green: 0.8, blue: 0.55))
+            .font(.system(size: 12)).foregroundStyle(Color(red: 1, green: 0.62, blue: 0.58))
             .fixedSize(horizontal: false, vertical: true)
             .padding(12).frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
+            .background(Color(red: 1, green: 0.3, blue: 0.3).opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
             .padding(.horizontal, 16).padding(.top, 12)
     }
 
@@ -308,7 +308,7 @@ private struct ConversationRow: View {
     var body: some View {
         HStack(spacing: 14) {
             Image(systemName: "text.bubble.fill").font(.system(size: 15))
-                .foregroundStyle(highlighted ? Color(red: 1, green: 0.7, blue: 0.52) : .white.opacity(0.4))
+                .foregroundStyle(highlighted ? WhooshGeometry.teal : .white.opacity(0.4))
                 .frame(width: 22)
             VStack(alignment: .leading, spacing: 3) {
                 Text(row.title.isEmpty ? "Untitled conversation" : row.title)
@@ -326,14 +326,14 @@ private struct ConversationRow: View {
                     Text("Send").font(.system(size: 11, weight: .semibold))
                     Image(systemName: "arrow.turn.down.left").font(.system(size: 10, weight: .bold))
                 }
-                .foregroundStyle(Color(red: 1, green: 0.72, blue: 0.54))
+                .foregroundStyle(WhooshGeometry.teal)
                 .padding(.horizontal, 9).padding(.vertical, 4)
-                .background(Color(red: 1, green: 0.62, blue: 0.45).opacity(0.14), in: Capsule())
+                .background(WhooshGeometry.accent.opacity(0.18), in: Capsule())
             }
         }
         .padding(.horizontal, 14).padding(.vertical, 11)
-        .background(highlighted ? Color.white.opacity(0.09) : Color.clear, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.white.opacity(highlighted ? 0.14 : 0), lineWidth: 1))
+        .background(highlighted ? WhooshGeometry.accent.opacity(0.13) : Color.clear, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(WhooshGeometry.accent.opacity(highlighted ? 0.4 : 0), lineWidth: 1))
     }
 
     static func activity(_ date: Date) -> String {

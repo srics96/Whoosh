@@ -31,8 +31,11 @@ enum WhooshGeometry {
             { var a = Path(); a.move(to: p(0.08, 0.84)); a.addQuadCurve(to: p(0.44, 0.74), control: p(0.24, 0.80)); return a }(),
         ]
     }
-    static let mint = Color(red: 0.42, green: 0.95, blue: 0.80)
-    static let amber = Color(red: 1.0, green: 0.62, blue: 0.40)
+    // "Flow" palette: a teal head fading to blue — movement, a handoff in flight.
+    static let teal = Color(red: 0.357, green: 0.910, blue: 0.784)
+    static let blue = Color(red: 0.298, green: 0.553, blue: 1.0)
+    /// The single UI accent (selected rows, primary buttons, focus) — the comet's blue.
+    static let accent = blue
 }
 
 struct WhooshMark: View {
@@ -47,18 +50,18 @@ struct WhooshMark: View {
             let r = CGRect(origin: .zero, size: size)
             let path = WhooshGeometry.comet(in: r, surge: surge)
             let shading = GraphicsContext.Shading.linearGradient(
-                Gradient(colors: [WhooshGeometry.mint.opacity(0.95), WhooshGeometry.amber]),
+                Gradient(colors: [WhooshGeometry.teal.opacity(0.95), WhooshGeometry.blue]),
                 startPoint: CGPoint(x: r.minX, y: r.maxY), endPoint: CGPoint(x: r.maxX, y: r.minY))
             // soft glow
             ctx.drawLayer { layer in
                 layer.addFilter(.blur(radius: size.width * 0.06))
-                layer.fill(path, with: .color(WhooshGeometry.amber.opacity(active ? 0.9 : 0.5)))
+                layer.fill(path, with: .color(WhooshGeometry.blue.opacity(active ? 0.9 : 0.5)))
             }
             // body
             ctx.fill(path, with: shading)
             // speed streaks
             for streak in WhooshGeometry.streaks(in: r) {
-                ctx.stroke(streak, with: .color(WhooshGeometry.mint.opacity(active ? 0.9 : 0.6)),
+                ctx.stroke(streak, with: .color(WhooshGeometry.teal.opacity(active ? 0.9 : 0.6)),
                            style: StrokeStyle(lineWidth: size.width * 0.045, lineCap: .round))
             }
             // bright head highlight
@@ -101,8 +104,8 @@ enum WhooshIdentity {
                 NSColor.black.setFill(); ctx.addPath(comet); ctx.fillPath()
             } else {
                 ctx.saveGState(); ctx.addPath(comet); ctx.clip()
-                let colors = [NSColor(calibratedRed: 0.42, green: 0.95, blue: 0.80, alpha: 1).cgColor,
-                              NSColor(calibratedRed: 1.0, green: 0.62, blue: 0.40, alpha: 1).cgColor] as CFArray
+                let colors = [NSColor(calibratedRed: 0.357, green: 0.910, blue: 0.784, alpha: 1).cgColor,
+                              NSColor(calibratedRed: 0.298, green: 0.553, blue: 1.0, alpha: 1).cgColor] as CFArray
                 if let g = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors, locations: [0, 1]) {
                     ctx.drawLinearGradient(g, start: CGPoint(x: inset.minX, y: inset.maxY),
                                            end: CGPoint(x: inset.maxX, y: inset.minY), options: [])
