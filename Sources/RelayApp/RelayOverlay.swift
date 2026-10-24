@@ -59,7 +59,7 @@ struct RelayOverlay: View {
     private var header: some View {
         HStack(spacing: 12) {
             WhooshMark(active: flying).frame(width: 22, height: 20)
-            directionPill
+            destinationPicker
             Spacer()
             Menu {
                 Button(model.isFreshSession ? "Send to \(model.source.other.displayName) instead" : "Keep it in \(model.source.displayName) (fresh session)") { model.swapApps() }.disabled(flying)
@@ -80,27 +80,39 @@ struct RelayOverlay: View {
         .padding(.horizontal, 20).padding(.top, 16).padding(.bottom, 12)
     }
 
-    private var directionPill: some View {
-        Button { model.swapApps() } label: {
-            HStack(spacing: 8) {
-                providerIcon(model.source, 18)
-                Text(model.source.displayName).font(.system(size: 13, weight: .semibold))
-                if model.isFreshSession {
-                    Image(systemName: "arrow.triangle.2.circlepath").font(.system(size: 10, weight: .bold)).foregroundStyle(.white.opacity(0.5))
-                    Text("fresh session").font(.system(size: 13, weight: .semibold)).foregroundStyle(.white.opacity(0.85))
+    /// Both destinations shown side by side so the choice — and that there IS a choice — is visible.
+    /// Click either, or press ⇥ to toggle. The selected one carries the accent.
+    private var destinationPicker: some View {
+        HStack(spacing: 4) {
+            targetSegment(fresh: true)
+            targetSegment(fresh: false)
+        }
+        .padding(3)
+        .background(Color.white.opacity(0.05), in: Capsule())
+        .overlay(Capsule().strokeBorder(Color.white.opacity(0.08)))
+        .disabled(flying)
+        .help("Where this chat goes — a fresh session of the same tool, or the other tool (⇥ to switch)")
+    }
+
+    @ViewBuilder private func targetSegment(fresh: Bool) -> some View {
+        let selected = model.isFreshSession == fresh
+        Button { model.destination = fresh ? model.source : model.source.other } label: {
+            HStack(spacing: 6) {
+                if fresh {
+                    Image(systemName: "arrow.triangle.2.circlepath").font(.system(size: 10, weight: .bold))
+                    Text("New \(model.source.displayName)").font(.system(size: 12.5, weight: .semibold))
                 } else {
-                    Image(systemName: "arrow.right").font(.system(size: 10, weight: .bold)).foregroundStyle(.white.opacity(0.5))
-                    providerIcon(model.destination, 18)
-                    Text(model.destination.displayName).font(.system(size: 13, weight: .semibold))
+                    providerIcon(model.source.other, 15)
+                    Text(model.source.other.displayName).font(.system(size: 12.5, weight: .semibold))
                 }
             }
-            .padding(.horizontal, 12).padding(.vertical, 7)
-            .background(Color.white.opacity(0.06), in: Capsule())
-            .overlay(Capsule().strokeBorder(Color.white.opacity(0.10)))
+            .padding(.horizontal, 11).padding(.vertical, 6)
+            .foregroundStyle(selected ? .white : .white.opacity(0.5))
+            .background(selected ? WhooshGeometry.accent.opacity(0.22) : Color.clear, in: Capsule())
+            .overlay(Capsule().strokeBorder(selected ? WhooshGeometry.accent.opacity(0.55) : Color.clear, lineWidth: 1))
+            .contentShape(Capsule())
         }
         .buttonStyle(.plain)
-        .disabled(flying)
-        .help(model.isFreshSession ? "Fresh \(model.source.displayName) session — ⇥ to switch tools" : "⇥ to keep it in \(model.source.displayName)")
     }
 
     private var searchBar: some View {
@@ -259,8 +271,8 @@ struct RelayOverlay: View {
             if flying { key("esc", "Close") }
             else {
                 key("↑↓", "Pick")
-                key("↵", model.isFreshSession ? "Fresh session" : "Send")
-                key("⇥", model.isFreshSession ? "Switch tool" : "Keep here")
+                key("↵", "Send")
+                key("⇥", "Switch target")
                 key("esc", "Close")
             }
             Spacer()
