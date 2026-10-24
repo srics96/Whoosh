@@ -27,7 +27,7 @@ Two moves, one hotkey:
 
 ```sh
 brew install --cask srics96/tap/whoosh
-xattr -dr com.apple.quarantine "/Applications/Whoosh.app"   # one-time OK to run it
+/usr/bin/xattr -dr com.apple.quarantine "/Applications/Whoosh.app"   # one-time OK to run it
 ```
 
 **Or download** → [**Whoosh.dmg**](https://github.com/srics96/Whoosh/releases/latest/download/Whoosh.dmg) → drag to Applications → **right-click → Open → Open**.
