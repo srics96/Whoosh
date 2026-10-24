@@ -98,13 +98,8 @@ struct RelayOverlay: View {
         let selected = model.isFreshSession == fresh
         Button { model.destination = fresh ? model.source : model.source.other } label: {
             HStack(spacing: 6) {
-                if fresh {
-                    Image(systemName: "arrow.triangle.2.circlepath").font(.system(size: 10, weight: .bold))
-                    Text("New \(model.source.displayName)").font(.system(size: 12.5, weight: .semibold))
-                } else {
-                    providerIcon(model.source.other, 15)
-                    Text(model.source.other.displayName).font(.system(size: 12.5, weight: .semibold))
-                }
+                providerIcon(fresh ? model.source : model.source.other, 15)
+                Text(fresh ? "Fresh session" : model.source.other.displayName).font(.system(size: 12.5, weight: .semibold))
             }
             .padding(.horizontal, 11).padding(.vertical, 6)
             .foregroundStyle(selected ? .white : .white.opacity(0.5))
@@ -272,7 +267,7 @@ struct RelayOverlay: View {
             else {
                 key("↑↓", "Pick")
                 key("↵", "Send")
-                key("⇥", "Switch target")
+                key("Tab", "Switch target")
                 key("esc", "Close")
             }
             Spacer()
