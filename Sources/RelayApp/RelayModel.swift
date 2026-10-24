@@ -68,6 +68,10 @@ final class RelayModel: ObservableObject {
     @Published var includeOwnedTestChats = false
     @Published var selectingThread: NativeThread?
     @Published var highlightedID: String?
+    /// True only when the highlight last moved via the keyboard. The list auto-scrolls to follow
+    /// keyboard navigation, but NOT hover — otherwise scrolling with the trackpad passes the cursor
+    /// over rows, moves the highlight, and recenters the list, fighting your scroll.
+    var highlightByKeyboard = false
     var visibleNativeThreads: [NativeThread] {
         let query = nativeSearch.trimmingCharacters(in: .whitespacesAndNewlines)
         let fixtures = Set(UserDefaults.standard.stringArray(forKey: "blinkOwnedFixtureIDs") ?? [])
@@ -170,6 +174,7 @@ final class RelayModel: ObservableObject {
     func moveHighlight(_ delta: Int) {
         let rows = visibleNativeThreads
         guard !rows.isEmpty else { return }
+        highlightByKeyboard = true
         // First arrow press from a clean open selects the top row; thereafter it moves.
         guard let id = highlightedID, let current = rows.firstIndex(where: { $0.id == id }) else {
             highlightedID = rows.first?.id

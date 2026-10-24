@@ -146,8 +146,8 @@ struct RelayOverlay: View {
                                         destination: model.destination.displayName)
                             .id(row.id)
                             .contentShape(Rectangle())
-                            .onTapGesture { model.highlightedID = row.id; model.flyHighlighted() }
-                            .onHover { if $0 { model.highlightedID = row.id } }
+                            .onTapGesture { model.highlightByKeyboard = false; model.highlightedID = row.id; model.flyHighlighted() }
+                            .onHover { if $0 { model.highlightByKeyboard = false; model.highlightedID = row.id } }
                     }
                     if model.nativeNextCursor != nil {
                         Button(action: model.loadMoreNativeThreads) {
@@ -161,8 +161,10 @@ struct RelayOverlay: View {
             }
             .frame(maxHeight: 360)
             .onChange(of: model.highlightedID) { id in
-                guard let id else { return }
-                withAnimation(reduced ? nil : .easeOut(duration: 0.12)) { proxy.scrollTo(id, anchor: .center) }
+                // Only follow keyboard navigation — never hover — so the trackpad scrolls freely.
+                guard let id, model.highlightByKeyboard else { return }
+                model.highlightByKeyboard = false
+                withAnimation(reduced ? nil : .easeOut(duration: 0.12)) { proxy.scrollTo(id) }
             }
         }
     }
