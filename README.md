@@ -23,11 +23,15 @@ Two moves, one hotkey:
 
 ## Install
 
-**Homebrew** (one line, no prompt):
+**Homebrew:**
 
 ```sh
-brew install --cask --no-quarantine srics96/tap/whoosh
+brew install --cask srics96/tap/whoosh
+xattr -dr com.apple.quarantine "/Applications/Whoosh.app"   # approve it once
 ```
+
+(Whoosh is ad-hoc signed, not notarized, so macOS quarantines it. Homebrew removed
+`--no-quarantine` in 5.0, so you clear the flag yourself — or just right-click → Open.)
 
 **Or download** → [**Whoosh.dmg**](https://github.com/srics96/Whoosh/releases/latest/download/Whoosh.dmg) → drag to Applications → **right-click → Open → Open** the first time.
 
@@ -61,8 +65,8 @@ tree, not a stale snapshot. Nothing bulky gets crammed into a URL, so big chats 
 - Reads **only the chat you pick** — read-only, all local, nothing auto-sent.
 - Codex via its signed CLI (even the one inside the Codex app); Claude Code via
   Anthropic's official SDK.
-- Open-source prototype, **ad-hoc signed, not Apple-notarized** — that's why the
-  download needs one approval (Homebrew's `--no-quarantine` skips it).
+- Open-source prototype, **ad-hoc signed, not Apple-notarized** — that's why it
+  needs one Gatekeeper approval (right-click → Open, or the `xattr` line above).
 
 <details>
 <summary><b>Build it yourself</b></summary>
