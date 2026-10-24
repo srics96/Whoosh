@@ -5,46 +5,52 @@
   </picture>
 </p>
 
-<p align="center"><b>Switch coding agents — or restart one fresh — without losing context.</b></p>
+<p align="center"><b>Switch coding agents or start a fresh session with a local context handoff.</b></p>
 
 <p align="center">
-  <img src="docs/whoosh-demo.gif" alt="Whoosh: pick a chat, press Return, and it opens in the other agent with your context loaded" width="760">
+  <img src="docs/whoosh-demo.gif" alt="Whoosh: pick a chat, press Return, and open a fresh draft with a local context handoff" width="760">
 </p>
 
 ---
 
 ## What it does
 
-One hotkey — **⌘⇧Space** — moves a coding chat between **Claude Code** and **Codex**,
-with your context already loaded. Pick a chat, press Return, and the destination opens
-with the goal, your last request, your project's conventions, **and your uncommitted
-diff** in the composer. You review, you send. Whoosh. 💨
+One hotkey, **⌘⇧Space**, prepares a handoff from a **Claude Code** or **Codex**
+coding session. Pick a chat and press Return to open a new draft with a short prompt
+pointing to local context files: your goal, latest request, available project
+conventions, captured transcript, and tracked uncommitted diff when available.
+You review the draft and press Send; the prompt asks the destination agent to read
+those files.
 
 Two moves, one hotkey:
 
 - **Fresh session** — your chat has gotten long and the model is drifting? Whoosh it
-  into a clean session of the *same* agent with the full context reloaded. No rot.
+  into a clean session of the *same* agent with a context handoff to read.
 - **Switch tools** — press **Tab** and send it to the other agent instead.
 
 ## Install
 
 ```sh
 brew install --cask srics96/tap/whoosh
-/usr/bin/xattr -dr com.apple.quarantine "/Applications/Whoosh.app"   # one-time OK to run it
 ```
 
 Or download [**Whoosh.dmg**](https://github.com/srics96/Whoosh/releases/latest/download/Whoosh.dmg),
-drag it to Applications, then **right-click → Open** the first time.
+drag it to Applications, then open Whoosh.
 
-Then press **⌘⇧Space**. Whoosh lives in your menu bar (the comet). ☄️
+Then press **⌘⇧Space**. Whoosh lives in your menu bar under its monochrome comet mark
+(the app and wordmark use the teal-to-blue version shown above).
 
-> **First launch:** Whoosh is open-source and free, so it isn't signed with a $99/yr
-> Apple certificate — macOS flags *every* app like that until you OK it once. That's the
-> `xattr` line (or right-click → Open). After that it just launches. The whole app is in
-> this repo if you want to read what it does first.
+> **First launch:** The downloadable app is **ad-hoc signed, not Apple-notarized**.
+> If macOS blocks it, review the warning and only continue if you trust the download.
+> After attempting to open it, use **System Settings → Privacy & Security → Open Anyway**
+> for Whoosh, as described in [Apple's guidance](https://support.apple.com/en-us/102445).
+> Source availability is not a substitute for signing, notarization, or a security review.
 
-> Needs an **Apple Silicon Mac** and **Claude Code and/or Codex** installed. Whoosh moves
-> chats between them; it doesn't replace them.
+> Needs **macOS 13+**. The downloadable DMG targets **Apple Silicon**. Reading Codex
+> sessions requires its signed CLI (including the copy bundled with the Codex app).
+> Opening a draft requires the **Codex desktop app** or **Claude desktop app with Code**.
+> Claude sources are local Claude Code sessions exposed by its SDK, not general
+> Claude Chat/Cowork history. Whoosh does not replace either agent or its account.
 
 ## How to use it
 
@@ -52,11 +58,13 @@ Then press **⌘⇧Space**. Whoosh lives in your menu bar (the comet). ☄️
 | --- | --- |
 | **⌘⇧Space** | open Whoosh |
 | type / **↑ ↓** | filter and pick a chat |
-| **Return** | send the chat you picked |
+| **Return** | prepare the selected chat's handoff and request a new draft |
 | **Tab** | switch target — fresh session ⇄ the other agent |
 
-First time, click **Connect** once per agent. The destination opens pre-filled — you
-review it and press Send. **Whoosh never sends for you.**
+First time, click **Connect** once per source agent. Whoosh requests a pre-filled
+destination draft; check it, review the context, and press Send yourself.
+**Whoosh never submits the prompt for you.** Opening the app does not verify that
+it displayed the draft or read the context files.
 
 ## What actually moves
 
@@ -64,23 +72,35 @@ Not just the transcript. Whoosh carries:
 
 - a short **brief** — the goal and where you are,
 - your **`CLAUDE.md` / `AGENTS.md`** conventions,
-- your **uncommitted diff** and changed-file list,
-- the full transcript.
+- your **tracked uncommitted diff** and changed-file list when capture succeeds,
+- the transcript content returned by the selected source adapter.
 
-The diff is what makes this un-copy-pasteable: the new session resumes on the real state
-of your working tree, not a stale snapshot. It's all dropped as local files the new agent
-reads — nothing bulky gets crammed into a URL, so big chats move fine.
+These are local files, not a transcript embedded in a URL. The new agent is asked to
+reconcile the snapshot with the current working tree before making changes.
+Untracked file contents are not copied; large or unavailable diffs can be omitted.
+
+This is a context handoff, **not a native chat import or a guarantee of complete
+context**. Provider APIs may return partial history; Claude captures its exposed
+active conversation chain, not alternate branches or subagents. Attachment bytes,
+hidden reasoning, permissions, running tools, and usage quotas do not transfer.
+Native history capture has a 240 MiB budget, and convention files are capped at
+256 KiB each. Review the packet before sharing it with another agent.
 
 ## Good to know
 
-- Reads **only the chat you pick** — read-only, all local, nothing auto-sent.
+- Lists session metadata for the picker, then reads the chat you select. Source
+  adapters are read-only; the handoff is written locally and no prompt is auto-submitted.
+  Submitting the draft to an agent is subject to that provider's data handling.
 - Codex via its signed CLI (even the one inside the Codex app); Claude Code via
   Anthropic's official SDK.
-- Git is read-only — branch, commit, changed files, and the uncommitted diff — with
-  external diff/textconv off, so no repository script runs. If the repo declares content
-  filters, diff content is skipped and only the file list is kept.
-- Open-source prototype, **ad-hoc signed, not Apple-notarized** — that's why it needs one
-  Gatekeeper approval (right-click → Open, or the `xattr` line above).
+- Git capture does not intentionally change your project. External diff/textconv
+  are disabled, and detected content filters cause diff content to be skipped.
+  This is not a sandbox: Git status is collected before that filter check, so use
+  trusted repositories rather than assuming no repository-configured program can run.
+- Handoff files can contain sensitive conversation or source-code content. Keep the
+  output folder private and review what the destination will be allowed to read.
+- The downloadable app is **ad-hoc signed, not Apple-notarized**; see the first-launch
+  note above.
 
 <details>
 <summary><b>Build it yourself</b></summary>
@@ -89,14 +109,21 @@ macOS 13+ and the Xcode Command Line Tools (Swift 5.9+).
 
 ```sh
 bash scripts/build-app-direct.sh   # → dist/Whoosh.app  (swiftc build; see note)
-bash scripts/package-dmg.sh        # → dist/Whoosh.dmg  (self-contained, Apple Silicon)
 open dist/Whoosh.app
 ```
 
-For the **Claude Code source**, install its SDK once first:
+For the **Claude Code source** in a local build, install Node.js/npm and the SDK
+**before building**:
 
 ```sh
-( cd Resources/ClaudeAdapter && npm install )
+( cd Resources/ClaudeAdapter && npm ci )
+bash scripts/build-app-direct.sh
+```
+
+To build the self-contained Apple Silicon DMG (bundles Node and the SDK):
+
+```sh
+bash scripts/package-dmg.sh        # → dist/Whoosh.dmg
 ```
 
 Note: some Command Line Tools installs make `swift build` fail at the manifest step (a
@@ -116,8 +143,8 @@ bootstrap that points at it:
 Whoosh-<timestamp>-<random>/
   BRIEF.md                   # Goal, latest request, recent exchange — resume from here
   context/                   # Copied CLAUDE.md / AGENTS.md conventions
-  workspace/changes.diff     # Your uncommitted staged + unstaged diff
-  transcript/original.<ext>  # Full transcript (SHA-256 verified on write)
+  workspace/changes.diff     # Tracked staged + unstaged diff, when available
+  transcript/original.<ext>  # Captured source content (SHA-256 verified on write)
   manifest.json              # Byte/hash evidence, checkpoint, Git metadata
   CHECKPOINT.md  bootstrap.txt  README.txt
 ```
@@ -135,5 +162,4 @@ Codex adapter), `RelayApp` (SwiftUI/AppKit UI, hotkey, animation), `Resources/Cl
 
 ---
 
-Open-source. No credentials, exports, or real conversations live in this repo — fixtures
-are synthetic.
+The source code is available on GitHub. The included conversation fixture is synthetic.
