@@ -23,7 +23,8 @@ public enum HandoffWriter {
         let bootstrap = makeBootstrap(checkpoint: checkpoint, directory: directory,
                                       archivePath: relativeArchive, sha256: conversation.sha256,
                                       byteCount: conversation.byteCount, isPartial: conversation.isPartial,
-                                      hasBrief: hasBrief, conventionNames: conventions.map(\.name))
+                                      hasBrief: hasBrief, conventionNames: conventions.map(\.name),
+                                      hasDiff: gitSnapshot.trackedDiff?.isEmpty == false)
         // Validate the full payload before writing anything. No silent truncation or overwrite.
         let deepLink = try ClaudeLink.make(prompt: bootstrap, projectPath: projectURL.path)
         let manifest = ArchiveManifest(
@@ -63,6 +64,12 @@ public enum HandoffWriter {
                     let bytes = c.data.count > conventionByteCap ? Data(c.data.prefix(conventionByteCap)) : c.data
                     try writePrivate(bytes, to: contextDir.appendingPathComponent(c.name))
                 }
+            }
+            if let diff = gitSnapshot.trackedDiff, !diff.isEmpty {
+                let workspaceDir = directory.appendingPathComponent("workspace", isDirectory: true)
+                try fm.createDirectory(at: workspaceDir, withIntermediateDirectories: false,
+                                       attributes: [.posixPermissions: NSNumber(value: 0o700)])
+                try writePrivate(Data(diff.utf8), to: workspaceDir.appendingPathComponent("changes.diff"))
             }
             // Do not export a prompt-bearing URL until prefill-only behavior is verified.
             try writePrivate(Data(readme.utf8), to: directory.appendingPathComponent("README.txt"))
@@ -105,13 +112,17 @@ public enum HandoffWriter {
 
     public static func makeBootstrap(checkpoint: Checkpoint, directory: URL, archivePath: String,
                                      sha256: String, byteCount: Int, isPartial: Bool,
-                                     hasBrief: Bool = false, conventionNames: [String] = []) -> String {
+                                     hasBrief: Bool = false, conventionNames: [String] = [],
+                                     hasDiff: Bool = false) -> String {
         let briefLine = hasBrief
             ? "Start with BRIEF.md in the handoff folder — a short state-of-the-work (goal, most recent request, recent exchange). Then open the transcript for detail."
             : "Read CHECKPOINT.md, then the transcript, and summarize the goal, decisions and next step before acting."
         let conventionsLine = conventionNames.isEmpty
             ? "No project convention files were found to carry over."
             : "Follow the project conventions copied into context/ (\(conventionNames.joined(separator: ", "))). They define how this codebase is worked on; apply them even if your tool would not load them natively."
+        let workspaceLine = hasDiff
+            ? "The work in progress is captured: workspace/changes.diff holds the uncommitted diff, and CHECKPOINT.md lists the changed files and recent commits. Reconcile it with the current working tree before changing anything — the files on disk are the source of truth."
+            : "CHECKPOINT.md lists the changed files and recent commits. Inspect the current working tree yourself — the files on disk are the source of truth and may be newer than the transcript."
         return """
         Continue a user-reviewed handoff from \(checkpoint.sourceName).
         Goal: \(checkpoint.goal)
@@ -121,7 +132,7 @@ public enum HandoffWriter {
         How to resume, in order:
         1. \(briefLine)
         2. \(conventionsLine)
-        3. Inspect the current working tree yourself — the transcript may be older than the files on disk. Reconcile before changing anything.
+        3. \(workspaceLine)
 
         Handoff folder (JSON-quoted path): \(jsonQuoted(directory.path))
         Full transcript: \(archivePath) (\(byteCount) bytes; SHA-256 \(sha256)). manifest.json records scope and the read-only Git snapshot.
@@ -160,11 +171,11 @@ public enum HandoffWriter {
         Repository: \(git.repositoryRoot ?? "Unavailable")
         Note: \(git.note)
 
-        Working-tree status (not captured in this prototype):
+        ## Working tree
         \(git.status ?? "Unavailable")
 
-        Tracked diff (not captured in this prototype):
-        \(git.trackedDiff ?? "Not captured")
+        ## Uncommitted diff
+        \(git.trackedDiff.map { _ in "See workspace/changes.diff for the full uncommitted diff." } ?? "No uncommitted diff captured.")
         """
     }
 

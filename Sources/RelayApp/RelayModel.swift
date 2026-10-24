@@ -30,7 +30,7 @@ final class RelayModel: ObservableObject {
     @Published var nextStep = "" { didSet { if nextStep != oldValue { invalidate() } } }
     @Published var decisions = "" { didSet { if decisions != oldValue { invalidate() } } }
     @Published var verification = "" { didSet { if verification != oldValue { invalidate() } } }
-    @Published var includeDiff = false { didSet { if includeDiff != oldValue { invalidate() } } }
+    @Published var includeDiff = true { didSet { if includeDiff != oldValue { invalidate() } } }
     @Published var sourceStopped = false { didSet { if !sourceStopped { transferApproved = false } } }
     @Published var transferApproved = false
     @Published var stage: Stage = .compose

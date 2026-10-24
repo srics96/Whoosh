@@ -15,20 +15,49 @@ public enum GitSnapshotReader {
             let root = try command(["rev-parse", "--show-toplevel"], in: projectURL).trimmed
             let commit = try? command(["rev-parse", "--verify", "HEAD"], in: projectURL).trimmed
             let branch = try? command(["symbolic-ref", "--quiet", "--short", "HEAD"], in: projectURL).trimmed
-            // IMPORTANT: even git status may run repository-configured clean filters.
-            // Until a fully sandboxed provider exists, do not inspect worktree status or diffs.
-            // rev-parse and symbolic-ref inspect metadata without applying content filters.
-            let status: String? = nil
-            let diff: String? = nil
-            var note = "Metadata only. Working-tree status, tracked diffs, untracked contents and submodule changes were not captured because Git content filters can execute repository-defined commands. No commit, stash, reset or index update."
-            if includeDiff { note += " Diff capture was requested but is intentionally disabled in this prototype." }
-            if commit == nil { note += " No HEAD commit was available (this may be a new repository)." }
+
+            // Changed-file list and recent trajectory. External diff/textconv are disabled and the
+            // environment ignores system/global config, so no repository-defined program is executed.
+            let porcelain = (try? command(["status", "--porcelain=v1", "-uall", "--no-renames"], in: projectURL))?.trimmed
+            let recentLog = (try? command(["log", "-n", "10", "--format=%h %s"], in: projectURL))?.trimmed
+            var statusParts: [String] = []
+            if let p = porcelain { statusParts.append(p.isEmpty ? "Working tree clean (no uncommitted changes)." : "Changed files:\n" + p) }
+            if let l = recentLog, !l.isEmpty { statusParts.append("Recent commits:\n" + l) }
+            let status: String? = statusParts.isEmpty ? nil : statusParts.joined(separator: "\n\n")
+
+            var diff: String? = nil
+            var note = "Read-only working-tree snapshot. No commit, stash, reset, index update, hook, or network."
+            if includeDiff {
+                if hasContentFilters(projectURL) {
+                    note += " Diff content was skipped: this repository configures Git content filters (clean/smudge); only the changed-file list is included."
+                } else {
+                    let staged = (try? command(["diff", "--cached", "--no-ext-diff", "--no-textconv", "--no-color"], in: projectURL)) ?? ""
+                    let unstaged = (try? command(["diff", "--no-ext-diff", "--no-textconv", "--no-color"], in: projectURL)) ?? ""
+                    let combined = [staged.isEmpty ? nil : "# Staged changes\n" + staged,
+                                    unstaged.isEmpty ? nil : "# Unstaged changes\n" + unstaged].compactMap { $0 }.joined(separator: "\n\n")
+                    if !combined.isEmpty { diff = combined }
+                    else if porcelain?.isEmpty == false { note += " A diff was requested but could not be captured (it may exceed the size budget); the changed-file list is still included." }
+                }
+            }
+            if commit == nil { note += " No HEAD commit (this may be a new repository)." }
             if branch == nil, commit != nil { note += " HEAD is detached or the branch could not be read." }
             return GitSnapshot(available: true, branch: branch, commit: commit,
                                repositoryRoot: root, status: status, trackedDiff: diff, note: note)
         } catch {
             return GitSnapshot(available: false, note: "Git snapshot unavailable: \(error.localizedDescription). The archive can still be saved.")
         }
+    }
+
+    /// True when the repository declares Git content filters (clean/smudge), in which case diff
+    /// content is skipped so no repository-defined command can run while normalizing the working tree.
+    private static func hasContentFilters(_ projectURL: URL) -> Bool {
+        if let cfg = try? command(["config", "--get-regexp", "^filter\\."], in: projectURL),
+           !cfg.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return true }
+        for rel in [".gitattributes", ".git/info/attributes"] {
+            if let text = try? String(contentsOf: projectURL.appendingPathComponent(rel), encoding: .utf8),
+               text.contains("filter=") { return true }
+        }
+        return false
     }
 
     /// Arguments are separate argv entries. No shell, string interpolation into commands, hooks,
