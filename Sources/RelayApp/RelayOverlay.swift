@@ -59,19 +59,27 @@ struct RelayOverlay: View {
     private var header: some View {
         HStack(spacing: 12) {
             WhooshMark(active: flying).frame(width: 22, height: 20)
-            VStack(alignment: .leading, spacing: 8) {
-                Menu {
-                    ForEach(RelayModel.AgentApp.allCases) { source in
-                        Button("Read \(source.displayName) chats") { model.chooseSource(source) }
+            // Shared columns keep both labels and both controls aligned, including
+            // when the longer Claude Code source label is selected.
+            Grid(alignment: .leading, horizontalSpacing: 8, verticalSpacing: 8) {
+                GridRow {
+                    Text("From:")
+                        .font(.system(size: 13, weight: .semibold))
+                    Menu {
+                        ForEach(RelayModel.AgentApp.allCases) { source in
+                            Button("Read \(source.displayName) chats") { model.chooseSource(source) }
+                        }
+                    } label: {
+                        Text(model.source.displayName)
+                            .font(.system(size: 13, weight: .semibold))
                     }
-                } label: {
-                    Text("From: \(model.source.displayName)").font(.system(size: 13, weight: .semibold))
+                    .menuStyle(.borderlessButton).fixedSize().disabled(flying)
+                    .accessibilityLabel("Source: \(model.source.displayName)")
+                    .help("Choose which app’s conversation history to read. Changing source resets the destination to that app.")
                 }
-                .menuStyle(.borderlessButton).fixedSize().disabled(flying)
-                .accessibilityLabel("Source: \(model.source.displayName)")
-                .help("Choose which app’s conversation history to read. Changing source resets the destination to that app.")
-                HStack(spacing: 8) {
-                    Text("To:").font(.system(size: 13, weight: .semibold))
+                GridRow {
+                    Text("To:")
+                        .font(.system(size: 13, weight: .semibold))
                     destinationPicker
                 }
             }
