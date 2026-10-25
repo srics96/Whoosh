@@ -36,6 +36,16 @@ Two moves, one hotkey:
 
 ## Install
 
+> **First-launch warning — applies to both Homebrew and the DMG:** Whoosh is
+> **ad-hoc signed, not signed with Apple Developer ID or notarized by Apple**.
+> Expect macOS to warn or block it on first launch. Only if you trust the official
+> download and are confident it has not been tampered with, first try opening Whoosh,
+> then go to **System Settings → Privacy & Security → Open Anyway** for Whoosh
+> (if offered). Review the next prompt and choose **Open** only if you want to proceed.
+> Follow [Apple’s per-app instructions](https://support.apple.com/en-ie/102445).
+> This exception does not verify that the app is malware-free. Keep Gatekeeper enabled;
+> do not remove quarantine attributes.
+
 ```sh
 brew install --cask srics96/tap/whoosh
 ```
@@ -45,12 +55,6 @@ drag it to Applications, then open Whoosh.
 
 Then press **⌘⇧Space**. Whoosh lives in your menu bar under its monochrome comet mark
 (the app and wordmark use the teal-to-blue version shown above).
-
-> **First launch:** The downloadable app is **ad-hoc signed, not Apple-notarized**.
-> If macOS blocks it, review the warning and only continue if you trust the download.
-> After attempting to open it, use **System Settings → Privacy & Security → Open Anyway**
-> for Whoosh, as described in [Apple's guidance](https://support.apple.com/en-us/102445).
-> Source availability is not a substitute for signing, notarization, or a security review.
 
 > Needs **macOS 13+**. The downloadable DMG targets **Apple Silicon**. Reading Codex
 > sessions requires its signed CLI (including the copy bundled with the Codex app).
