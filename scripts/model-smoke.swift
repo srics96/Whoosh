@@ -50,6 +50,27 @@ actor SyntheticTransport: CodexReadOnlyRPCTransport {
     @MainActor static func main() async throws {
         // In-memory registration only: no persisted preferences, account access, or actual CLI discovery.
         UserDefaults.standard.register(defaults: ["blinkDesignPreview": true])
+        let navigation = RelayModel()
+        navigation.nativeThreads = (1...20).map { n in
+            .init(id: String(n), title: "Row \(n)", preview: "", directory: nil,
+                  updatedAt: Date(timeIntervalSince1970: Double(100-n)))
+        }
+        navigation.highlightedID = nil
+        for n in 1...20 { navigation.moveHighlight(1); precondition(navigation.highlightedID == String(n)) }
+        navigation.moveHighlight(1); precondition(navigation.highlightedID == "20")
+        for n in stride(from: 19, through: 1, by: -1) { navigation.moveHighlight(-1); precondition(navigation.highlightedID == String(n)) }
+        navigation.moveHighlight(-1); precondition(navigation.highlightedID == "1")
+        navigation.nativeSearch = "Row 1"; navigation.ensureHighlight()
+        let filtered = navigation.visibleNativeThreads.map(\.id)
+        for id in filtered.dropFirst() { navigation.moveHighlight(1); precondition(navigation.highlightedID == id) }
+        navigation.nativeSearch = ""; navigation.highlightedID = "20"
+        navigation.nativeThreads.append(.init(id: "21", title: "Row 21", preview: "", directory: nil, updatedAt: Date(timeIntervalSince1970: 79)))
+        navigation.ensureHighlight(); precondition(navigation.highlightedID == "20")
+        navigation.moveHighlight(1); precondition(navigation.highlightedID == "21")
+        navigation.nativeSearch = "No match"; navigation.ensureHighlight(); navigation.moveHighlight(1)
+        precondition(navigation.highlightedID == nil)
+        await navigation.shutdown()
+        print("PASS picker single-step, repeat, boundaries, filtering, empty results and appended page")
         let transport = SyntheticTransport()
         let provider = CodexNativeSourceProvider(transport: transport)
         _ = try await provider.connect(executableURL: URL(fileURLWithPath: "/synthetic"), userApproved: true)

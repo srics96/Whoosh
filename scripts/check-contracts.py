@@ -104,6 +104,16 @@ class PortableContracts(unittest.TestCase):
             for forbidden in ('"auth.json"', '".claude"', '".codex/sessions"', 'sqlite3_open', 'CGEventTapCreate'):
                 self.assertNotIn(forbidden, text, str(path))
 
+    def test_hover_cannot_replace_keyboard_selection(self):
+        overlay = (ROOT / "Sources/RelayApp/RelayOverlay.swift").read_text()
+        callbacks = re.findall(r"\.onHover\s*\{([^}]*)\}", overlay)
+        self.assertTrue(callbacks)
+        for callback in callbacks:
+            self.assertNotIn("model.", callback)
+            self.assertNotIn("highlightedID", callback)
+        app = (ROOT / "Sources/RelayApp/RelayApp.swift").read_text()
+        self.assertEqual(app.count("NSEvent.addLocalMonitorForEvents"), 1)
+
     def test_app_bundle_metadata(self):
         with (ROOT / "Resources/Info.plist").open("rb") as stream:
             info = plistlib.load(stream)

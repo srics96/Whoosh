@@ -197,7 +197,6 @@ struct RelayOverlay: View {
                             .id(row.id)
                             .contentShape(Rectangle())
                             .onTapGesture { model.highlightByKeyboard = false; model.highlightedID = row.id; model.flyHighlighted() }
-                            .onHover { if $0 { model.highlightByKeyboard = false; model.highlightedID = row.id } }
                     }
                     if model.nativeNextCursor != nil {
                         Button(action: model.loadMoreNativeThreads) {
@@ -368,6 +367,7 @@ private struct ConversationRow: View {
     let row: RelayModel.NativeThread
     let highlighted: Bool
     let destination: String
+    @State private var hovered = false
 
     var body: some View {
         HStack(spacing: 14) {
@@ -396,8 +396,11 @@ private struct ConversationRow: View {
             }
         }
         .padding(.horizontal, 14).padding(.vertical, 11)
-        .background(highlighted ? WhooshGeometry.accent.opacity(0.13) : Color.clear, in: RoundedRectangle(cornerRadius: 12))
+        .background(highlighted ? WhooshGeometry.accent.opacity(0.13) : (hovered ? Color.white.opacity(0.04) : Color.clear), in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(WhooshGeometry.accent.opacity(highlighted ? 0.4 : 0), lineWidth: 1))
+        // Scrolling can move rows beneath a stationary pointer. Hover is visual only;
+        // it must never replace the keyboard selection or its scroll request.
+        .onHover { hovered = $0 }
     }
 
     static func activity(_ date: Date) -> String {
