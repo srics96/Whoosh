@@ -26,10 +26,9 @@ components have their own copyright notices and licenses. Preserve the complete,
 version-matched [Node.js LICENSE](https://github.com/nodejs/node/blob/v22.23.4/LICENSE)
 alongside the redistributed runtime, including its third-party notices.
 
-**Packaging gap:** the current script copies the Node executable but does not copy
-that LICENSE file. This document does not fix the package contents or certify
-existing downloads. A packaging update and verification of the resulting app/DMG
-are still needed before treating that notice requirement as resolved.
+The packaging script copies the complete version-matched Node LICENSE to
+`Whoosh.app/Contents/Resources/ClaudeAdapter/node-runtime/LICENSE`. Verify that
+file in each release artifact; this update does not change older downloads.
 
 ## Transitive npm dependencies
 

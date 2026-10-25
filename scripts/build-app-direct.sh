@@ -17,6 +17,7 @@ if [[ "$(uname -s)" != Darwin ]]; then
   exit 1
 fi
 
+TARGET="$(uname -m)-apple-macos13.0"
 B=".build-direct"
 rm -rf "$B"
 mkdir -p "$B"
@@ -26,7 +27,7 @@ APP_SOURCES=$(find Sources/RelayApp -name '*.swift' | sort)
 
 echo "Compiling RelayCore…"
 # shellcheck disable=SC2086
-xcrun swiftc -O -wmo -parse-as-library \
+xcrun swiftc -target "$TARGET" -O -wmo -parse-as-library \
   -module-name RelayCore \
   -emit-module -emit-module-path "$B/RelayCore.swiftmodule" \
   -emit-library -static -o "$B/libRelayCore.a" \
@@ -34,7 +35,7 @@ xcrun swiftc -O -wmo -parse-as-library \
 
 echo "Compiling Whoosh (RelayApp)…"
 # shellcheck disable=SC2086
-xcrun swiftc -O -wmo \
+xcrun swiftc -target "$TARGET" -O -wmo \
   -module-name Whoosh \
   -I "$B" \
   -o "$B/Whoosh" \

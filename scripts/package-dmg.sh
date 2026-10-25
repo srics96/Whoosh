@@ -31,7 +31,7 @@ fi
 # 2. Claude Agent SDK present in adapter resources (read-only session reader).
 if [[ ! -f Resources/ClaudeAdapter/node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs ]]; then
   echo "Installing Claude Agent SDK…"
-  ( cd Resources/ClaudeAdapter && npm install --no-fund --no-audit )
+  ( cd Resources/ClaudeAdapter && npm ci --no-fund --no-audit )
 fi
 
 # 3. Build the app bundle (copies Resources/ClaudeAdapter, including node_modules).
@@ -51,6 +51,11 @@ rm -rf "$ADAPTER"/node_modules/@anthropic-ai/claude-agent-sdk-darwin-* \
 rm -rf "$ADAPTER/node-runtime"
 mkdir -p "$ADAPTER/node-runtime/bin"
 cp "$NODE_DIR/bin/node" "$ADAPTER/node-runtime/bin/node"
+# Keep the complete version-matched Node and bundled-component notices.
+test -s "$NODE_DIR/LICENSE"
+cp "$NODE_DIR/LICENSE" "$ADAPTER/node-runtime/LICENSE"
+cp LICENSE THIRD_PARTY_NOTICES.md "$APP/Contents/Resources/"
+test -s "$ADAPTER/node_modules/@anthropic-ai/claude-agent-sdk/LICENSE.md"
 chmod +x "$ADAPTER/node-runtime/bin/node"
 printf '{"node":"node-runtime/bin/node","sdkModule":"./node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs"}\n' > "$ADAPTER/runtime.json"
 
@@ -71,10 +76,12 @@ cat > "$STAGING/INSTALL — read me.txt" <<'TXT'
 Whoosh — install
 
 1. Drag Whoosh into the Applications folder (shown here).
-2. Open Applications and double-click Whoosh. macOS will say it "cannot be
-   opened because Apple cannot check it for malicious software."
-3. Open  > System Settings > Privacy & Security, scroll down, and click
-   "Open Anyway" next to Whoosh. Confirm. (One time only.)
+2. Open Applications and double-click Whoosh. This app is ad-hoc signed,
+   not Developer ID signed or Apple-notarized. Expect a first-launch warning.
+3. Only if you trust the official download and believe it was not tampered with,
+   use System Settings > Privacy & Security > Open Anyway for Whoosh (if offered),
+   then review and confirm Open. This exception does not verify malware safety.
+   See https://support.apple.com/en-ie/102445 . Keep Gatekeeper enabled.
 4. Whoosh lives in the menu bar (top-right). Press Cmd-Shift-Space to open it.
 
 Whoosh moves a conversation between Claude and Codex. Those apps (and the Codex
@@ -85,7 +92,6 @@ TXT
 
 rm -f dist/Whoosh.dmg
 hdiutil create -volname "Whoosh" -srcfolder "$STAGING" -ov -format UDZO -quiet dist/Whoosh.dmg
-xattr -c dist/Whoosh.dmg 2>/dev/null || true
 
 SIZE=$(du -h dist/Whoosh.dmg | cut -f1)
 printf '\nBuilt distributable DMG: %s (%s)\n' "$PWD/dist/Whoosh.dmg" "$SIZE"
