@@ -84,10 +84,11 @@ Whoosh — install
    See https://support.apple.com/en-ie/102445 . Keep Gatekeeper enabled.
 4. Whoosh lives in the menu bar (top-right). Press Cmd-Shift-Space to open it.
 
-Whoosh moves a conversation between Claude and Codex. Those apps (and the Codex
-CLI for the Codex side) must be installed on this Mac for it to have anything
-to read from or open into. Whoosh never sends anything automatically — it opens
-a pre-filled draft for you to review and press Send.
+Whoosh carries local coding context between Claude Code and Codex. Desktop mode
+needs the destination desktop app; Terminal (manual) needs its installed, signed-in
+CLI. Codex reading needs its signed CLI, including the desktop app bundled copy.
+Whoosh never sends anything automatically. Review the desktop draft, or run the
+separately copied Terminal command and paste the handoff prompt, then send.
 TXT
 
 rm -f dist/Whoosh.dmg

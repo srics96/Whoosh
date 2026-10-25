@@ -23,10 +23,17 @@ final class RelayModel: ObservableObject {
         var projectName: String { directory.map { URL(fileURLWithPath:$0).lastPathComponent } ?? "Project unavailable" }
     }
 
-    @Published var source: AgentApp = .codex { didSet { if source != oldValue { invalidate(); clearConversation(); nativeConnected = false; nativeThreads = []; nativeNextCursor = nil; autoConnectionAttempted = false; restoreConnectionIfApproved() } } }
+    @Published var source: AgentApp = .codex { didSet { if source != oldValue { sourceGeneration = UUID(); invalidate(); clearConversation(); nativeConnected = false; nativeThreads = []; nativeNextCursor = nil; autoConnectionAttempted = false; restoreConnectionIfApproved() } } }
     // Defaults to the same tool: the hotkey's primary job is a fresh session of the agent you're in
     // (context rot), with a cross-tool switch one Tab away.
     @Published var destination: AgentApp = .codex { didSet { if destination != oldValue { invalidate() } } }
+    enum DestinationSurface: String, CaseIterable, Identifiable {
+        case desktop = "Desktop", terminal = "Terminal (manual)"
+        var id: String { rawValue }
+    }
+    @Published var destinationSurface: DestinationSurface = .desktop { didSet { if destinationSurface != oldValue { invalidate() } } }
+    @Published var clipboardNotice: String?
+    var sourceProgressTitle: String { selectingThread == nil ? "Finding local conversations…" : "Reading the selected conversation…" }
     /// True when the handoff lands in a fresh session of the same agent, not the other tool.
     var isFreshSession: Bool { source == destination }
     @Published var userInstruction = "" { didSet { if userInstruction != oldValue { invalidate() } } }
@@ -90,6 +97,7 @@ final class RelayModel: ObservableObject {
     @Published var claudeLinkAvailable = false
     @Published var claudeApplicationURL: URL?
     var onDestinationOpened: (() -> Void)?
+    private var sourceGeneration = UUID()
     private var handoffTask: Task<Void, Never>?
     private var autoFly = false
     private var resumeBrief = ""
@@ -210,6 +218,7 @@ final class RelayModel: ObservableObject {
         guard stage != .preparing && stage != .departing && stage != .opening else { return }
         prepared = nil
         transferApproved = false
+        clipboardNotice = nil
         sourceStopped = sourceIdleKnown
         stage = .compose
         errorMessage = nil
@@ -300,7 +309,8 @@ final class RelayModel: ObservableObject {
                         throw RelayError.invalidInput("Possible sensitive data in your instructions. Remove it before continuing.")
                     }
                     try PrivateHandoffStorage.ensureDirectory(outputURL)
-                    return GitSnapshotReader.capture(projectURL: projectURL, includeDiff: captureDiff)
+                    try ProjectFolder.require(projectURL)
+                    return try GitSnapshotReader.captureCheckingCancellation(projectURL: projectURL, includeDiff: captureDiff)
                 }
                 phase = .archive
                 let result = try await CancellableWork.run {
@@ -314,7 +324,9 @@ final class RelayModel: ObservableObject {
                 if continueToDestination {
                     try Task.checkCancellation()
                     transferApproved = true
-                    if destination == .codex { launchCodex() } else { launchClaude() }
+                    if destinationSurface == .desktop {
+                        if destination == .codex { launchCodex() } else { launchClaude() }
+                    }
                 }
             } catch is CancellationError {
                 stage = .compose
@@ -334,7 +346,7 @@ final class RelayModel: ObservableObject {
     }
 
     var selectionBlocker: String? {
-        if nativeBusy { return "Reading the selected conversation…" }
+        if nativeBusy { return sourceProgressTitle }
         if conversation == nil { return "Choose a conversation first." }
         if sensitiveContentBlocked { return "Possible sensitive data found. Review the history before continuing." }
         if projectURL == nil { return "This conversation has no available project folder. Choose it once below." }
@@ -360,7 +372,14 @@ final class RelayModel: ObservableObject {
         invalidate()
     }
 
+    private func validateDestinationProject() -> Bool {
+        guard let prepared else { return false }
+        do { try ProjectFolder.require(URL(fileURLWithPath: prepared.manifest.projectPath)); return true }
+        catch { transferApproved = false; errorMessage = error.localizedDescription; return false }
+    }
+
     func launchClaude() {
+        guard validateDestinationProject() else { return }
         guard destination == .claude, stage == .review, transferApproved, sourceStopped,
               let prepared else { return }
         guard let handler = NSWorkspace.shared.urlForApplication(toOpen: prepared.deepLink) else {
@@ -421,6 +440,7 @@ final class RelayModel: ObservableObject {
     }
 
     func launchCodex() {
+        guard validateDestinationProject() else { return }
         guard destination == .codex, stage == .review, transferApproved, sourceStopped,
               let prepared else { return }
         guard let appURL = codexApplicationURL else {
@@ -458,6 +478,24 @@ final class RelayModel: ObservableObject {
         } catch { errorMessage = error.localizedDescription }
     }
 
+    func copyTerminalCommand() {
+        guard destinationSurface == .terminal, stage == .review, let prepared else { return }
+        do {
+            let command = try TerminalHandoff.launchCommand(agent: destination == .claude ? .claude : .codex,
+                projectURL: URL(fileURLWithPath: prepared.manifest.projectPath))
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(command, forType: .string)
+            clipboardNotice = "Launch command copied. Run it in your terminal; it contains no prompt."
+        } catch { errorMessage = error.localizedDescription }
+    }
+
+    func copyReviewedBootstrap() {
+        guard stage == .review, let prepared else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(prepared.bootstrap, forType: .string)
+        clipboardNotice = "Bootstrap copied. Paste into the new session, review, then send when ready."
+    }
+
     func revealFiles() {
         guard let prepared else { return }
         NSWorkspace.shared.activateFileViewerSelecting([prepared.directory])
@@ -476,6 +514,62 @@ final class RelayModel: ObservableObject {
         invalidate()
         clearConversation()
         goal = ""; nextStep = ""; decisions = ""; verification = ""
+    }
+
+    var canRefreshConversations: Bool {
+        nativeConnected && !isBusy && stage == .compose && conversation == nil
+    }
+
+    /// Reopening the picker refreshes metadata, never a selected history or prepared draft.
+    func refreshForPresentation() {
+        if nativeConnected { refreshConversations() }
+        else { restoreConnectionIfApproved() }
+    }
+
+    func refreshConversations() {
+        guard canRefreshConversations else { return }
+        let requestedSource = source
+        let generation = sourceGeneration
+        selectingThread = nil
+        nativeBusy = true
+        errorMessage = nil
+        nativeSelectionTask = Task {
+            defer { nativeBusy = false; nativeSelectionTask = nil }
+            do {
+                var rows: [NativeThread]
+                let cursor: String?
+                if requestedSource == .codex {
+                    // Reuse the existing connection; do not restart/schema-parse the helper.
+                    let page = try await nativeProvider.listThreads()
+                    rows = page.threads.map { NativeThread(id: $0.id, title: $0.displayName,
+                        preview: $0.preview ?? "", directory: $0.cwd,
+                        updatedAt: $0.updatedAt.map(Date.init(timeIntervalSince1970:))) }
+                    cursor = page.nextCursor
+                } else {
+                    let page = try await claudeAdapter.call(action: "list", offset: 0)
+                    rows = (page.sessions ?? []).map { NativeThread(id: $0.sessionId, title: $0.summary,
+                        preview: "", directory: $0.cwd, updatedAt: Date(timeIntervalSince1970: $0.lastModified / 1000)) }
+                    cursor = page.nextOffset.map(String.init)
+                }
+                try Task.checkCancellation()
+                guard source == requestedSource, sourceGeneration == generation else { return }
+                var seen = Set<String>()
+                rows = rows.filter { seen.insert($0.id).inserted }
+                nativeThreads = rows
+                nativeNextCursor = cursor
+                ensureHighlight()
+            } catch {
+                guard source == requestedSource, sourceGeneration == generation else { return }
+                // Keep the cached rows/query intact; errors must never look like an empty account.
+                errorMessage = error is CancellationError
+                    ? "Conversation refresh cancelled. Reopen to try again."
+                    : "Couldn’t refresh conversations. Cached results are shown. " + error.localizedDescription
+                if error is CancellationError && requestedSource == .codex {
+                    nativeConnected = false
+                    autoConnectionAttempted = false
+                }
+            }
+        }
     }
 
     func restoreConnectionIfApproved() {
@@ -503,6 +597,7 @@ final class RelayModel: ObservableObject {
         guard !isBusy else { return }
         if source == .claude { connectClaude(); return }
         nativeConnected = false
+        selectingThread = nil
         nativeBusy = true
         errorMessage = nil
         nativeSelectionTask = Task {
@@ -519,6 +614,7 @@ final class RelayModel: ObservableObject {
 
     private func connectNativeCodex(executable: URL) {
         nativeConnected = false
+        selectingThread = nil
         nativeBusy = true
         errorMessage = nil
         nativeSelectionTask = Task {
@@ -549,6 +645,7 @@ final class RelayModel: ObservableObject {
     func loadMoreNativeThreads() {
         if source == .claude { connectClaude(offset: Int(nativeNextCursor ?? "0") ?? 0); return }
         guard nativeConnected, !nativeBusy, let cursor = nativeNextCursor else { return }
+        selectingThread = nil
         nativeBusy = true
         nativeSelectionTask = Task {
             defer { nativeBusy = false; nativeSelectionTask = nil }
@@ -591,11 +688,7 @@ final class RelayModel: ObservableObject {
                 selectedNativeResult = result
                 nativeSelectedID = id
                 conversation = archive
-                if let cwd = result.summary.cwd, (cwd as NSString).isAbsolutePath,
-                   (try? URL(fileURLWithPath: cwd).resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true {
-                    projectURL = URL(fileURLWithPath: cwd)
-                }
-                if projectURL == nil { projectURL = FileManager.default.homeDirectoryForCurrentUser }
+                projectURL = ProjectFolder.available(result.summary.cwd)
                 setAutomaticCheckpoint(digest)
                 sensitiveContentBlocked = blocked
                 sourceIdleKnown = result.summary.status?.type == "idle"
@@ -618,6 +711,8 @@ final class RelayModel: ObservableObject {
             let fly = autoFly; autoFly = false
             if ok && sensitiveContentBlocked {
                 errorMessage = "Possible sensitive data found. Review and redact the history before continuing."
+            } else if ok && projectURL == nil {
+                errorMessage = "This conversation’s project folder is missing. Choose a folder explicitly; no home-directory fallback was used."
             } else if ok && fly { continueHandoff() }
         }
     }
@@ -629,6 +724,7 @@ final class RelayModel: ObservableObject {
 
     private func connectClaude(offset: Int = 0) {
         guard !nativeBusy else { return }
+        selectingThread = nil
         nativeBusy = true; errorMessage = nil
         nativeSelectionTask = Task {
             defer { nativeBusy = false; nativeSelectionTask = nil }
@@ -662,9 +758,7 @@ final class RelayModel: ObservableObject {
                     return (archive, digest, try SensitiveContentScreen.scan(archive.data))
                 }
                 clearConversation(); selectingThread = row; selectedClaudeInfo = info; nativeSelectedID = id; conversation = archive
-                if let cwd = info.cwd, (cwd as NSString).isAbsolutePath,
-                   (try? URL(fileURLWithPath:cwd).resourceValues(forKeys:[.isDirectoryKey]).isDirectory) == true { projectURL = URL(fileURLWithPath:cwd) }
-                if projectURL == nil { projectURL = FileManager.default.homeDirectoryForCurrentUser }
+                projectURL = ProjectFolder.available(info.cwd)
                 setAutomaticCheckpoint(digest)
                 sensitiveContentBlocked = blocked
                 sourceIdleKnown = false; sourceStopped = true
@@ -676,6 +770,8 @@ final class RelayModel: ObservableObject {
             let fly = autoFly; autoFly = false
             if ok && sensitiveContentBlocked {
                 errorMessage = "Possible sensitive data found. Review and redact the history before continuing."
+            } else if ok && projectURL == nil {
+                errorMessage = "This conversation’s project folder is missing. Choose a folder explicitly; no home-directory fallback was used."
             } else if ok && fly { continueHandoff() }
         }
     }
@@ -726,6 +822,7 @@ final class RelayModel: ObservableObject {
     }
 
     func disconnectNativeCodex() {
+        sourceGeneration = UUID()
         UserDefaults.standard.set(false, forKey: source == .codex ? "blinkCodexConnectionApproved" : "blinkClaudeConnectionApproved")
         autoConnectionAttempted = true
         nativeConnected = false

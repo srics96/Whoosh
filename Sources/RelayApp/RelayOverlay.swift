@@ -82,11 +82,18 @@ struct RelayOverlay: View {
                         .font(.system(size: 13, weight: .semibold))
                     destinationPicker
                 }
+                GridRow {
+                    Text("In:").font(.system(size: 13, weight: .semibold))
+                    Picker("Destination interface", selection: $model.destinationSurface) {
+                        ForEach(RelayModel.DestinationSurface.allCases) { Text($0.rawValue).tag($0) }
+                    }.labelsHidden().pickerStyle(.segmented).frame(width: 260).disabled(flying)
+                }
             }
             Spacer()
             Menu {
                 Button(model.isFreshSession ? "Send to \(model.source.other.displayName) instead" : "Keep it in \(model.source.displayName) (fresh session)") { model.swapApps() }.disabled(flying)
                 Button("Read \(model.source.other.displayName) chats instead") { model.readOtherSource() }.disabled(flying)
+                Button("Refresh conversations") { model.refreshConversations() }.disabled(!model.canRefreshConversations)
                 if model.nativeConnected { Button("Disconnect " + model.source.displayName) { model.disconnectNativeCodex() }.disabled(flying) }
                 Divider()
                 Button("Import a conversation export…") { model.importConversation() }
@@ -158,6 +165,17 @@ struct RelayOverlay: View {
     @ViewBuilder private var content: some View {
         if let error = model.errorMessage {
             banner(error)
+        }
+        if model.conversation != nil {
+            VStack(spacing: 10) {
+                if model.projectURL == nil {
+                    Text("Choose the project folder for this conversation.")
+                    Button("Choose project folder…") { model.chooseFolder(output: false) }
+                } else {
+                    Text(model.projectURL!.path).font(.caption).lineLimit(2)
+                    Button("Prepare selected conversation") { model.continueHandoff() }.disabled(!model.canPrepare)
+                }
+            }.padding()
         }
         if !model.nativeConnected {
             connectState
@@ -255,6 +273,18 @@ struct RelayOverlay: View {
             if model.stage == .complete {
                 Button("New handoff  ↵") { model.startAgain() }.buttonStyle(RelaySecondaryButton())
             } else if model.stage == .review {
+                if model.destinationSurface == .terminal {
+                    VStack(spacing: 10) {
+                        Text("1. Run the launch command in your terminal.\n2. Copy the bootstrap into the empty session, review, then send.")
+                            .font(.system(size: 13)).multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
+                        HStack {
+                            Button("Copy launch command") { model.copyTerminalCommand() }
+                            Button("Copy bootstrap") { model.copyReviewedBootstrap() }
+                            Button("Show files") { model.revealFiles() }
+                        }
+                        if let notice = model.clipboardNotice { Text(notice).font(.caption).multilineTextAlignment(.center) }
+                    }
+                }
                 Button("Back to chats") { model.startAgain() }.buttonStyle(RelaySecondaryButton())
             }
         }
@@ -263,24 +293,24 @@ struct RelayOverlay: View {
 
     private var departed: Bool { [.departing, .opening, .complete].contains(model.stage) }
     private var flightTitle: String {
-        let dest = model.destination.displayName
         switch model.stage {
-        case .complete: return model.isFreshSession ? "Fresh \(dest) session ready" : "Opened in " + dest
-        case .review: return "Couldn’t open " + dest
-        default:
-            if model.nativeBusy { return "Reading your conversation…" }
-            return model.isFreshSession ? "Starting a fresh \(dest) session…" : "Sending to " + dest
+        case .complete: return model.completionTitle
+        case .review: return model.destinationSurface == .terminal ? "Ready for the terminal" : "Draft needs attention"
+        case .preparing: return model.phase.rawValue
+        case .opening: return "Opening a draft in " + model.destination.displayName
+        default: return model.nativeBusy ? model.sourceProgressTitle : "Preparing your selected conversation…"
         }
     }
     private var flightSubtitle: String {
-        let dest = model.destination.displayName
         switch model.stage {
-        case .complete:
-            return model.isFreshSession
-                ? "Your context is loaded in a fresh \(dest) session — clean window, nothing forgotten. Review it and press Send; Whoosh never submits for you."
-                : "Your context is in the new \(dest) composer. Review it and press Send — Whoosh never submits for you."
-        case .review: return model.errorMessage ?? "The handoff was prepared but the destination didn’t open."
-        default: return "Preserving the conversation and preparing a draft. This takes a moment."
+        case .complete: return model.completionDetail
+        case .review:
+            return model.errorMessage ?? (model.destinationSurface == .terminal
+                ? "A fresh interactive CLI session requires the CLI to be installed and signed in. Nothing has been launched or sent."
+                : "Your files are preserved. Destination receipt and reading have not been verified.")
+        default:
+            if model.nativeBusy && model.selectingThread == nil { return "Listing local chat summaries. Choose a conversation before its history is read." }
+            return "Preserving the selected conversation. Nothing is submitted automatically."
         }
     }
 

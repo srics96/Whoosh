@@ -10,7 +10,7 @@ swiftc -O -wmo -enable-testing -parse-as-library -module-cache-path "$CACHE" \
   -emit-library -static -o "$B/libRelayCore.a" Sources/RelayCore/*.swift Sources/RelayCore/Providers/*.swift
 swiftc -O -wmo -module-cache-path "$CACHE" -I "$B" \
   Sources/RelayApp/*.swift "$B/libRelayCore.a" -o "$B/Whoosh"
-for TEST in performance-smoke native-pagination-smoke; do
+for TEST in performance-smoke native-pagination-smoke handoff-hardening-smoke; do
   swiftc -module-cache-path "$CACHE" -I "$B" -parse-as-library \
     "scripts/$TEST.swift" "$B/libRelayCore.a" -o "$B/$TEST"
   "$B/$TEST"

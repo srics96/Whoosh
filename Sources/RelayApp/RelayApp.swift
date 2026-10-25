@@ -153,7 +153,7 @@ final class RelayAppDelegate: NSObject, NSApplicationDelegate {
         if model.stage == .complete || model.stage == .review { model.startAgain() }
         // Capture foreground context BEFORE Whoosh becomes active. It suggests a source app, never a thread.
         model.suggestSource(from: NSWorkspace.shared.frontmostApplication)
-        model.restoreConnectionIfApproved()
+        model.refreshForPresentation()
         if panel == nil { panel = makePanel() }
         model.nativeSearch = ""
         model.errorMessage = nil
