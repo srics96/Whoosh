@@ -1,4 +1,5 @@
 import AppKit
+import Carbon
 import SwiftUI
 
 @main
@@ -22,6 +23,7 @@ final class RelayPanel: NSPanel {
 @MainActor
 final class RelayAppDelegate: NSObject, NSApplicationDelegate {
     private let model = RelayModel()
+    private var nudgeMonitor: ContextNudgeMonitor?
     private let hotKey = HotKeyController()
     private var statusItem: NSStatusItem?
     private var panel: RelayPanel?
@@ -40,6 +42,14 @@ final class RelayAppDelegate: NSObject, NSApplicationDelegate {
             self?.showOverlay()
         }
         configureStatusItem()
+        if Bundle.main.bundleIdentifier != nil {
+            let monitor = ContextNudgeMonitor(model: model)
+            monitor.onOpen = { [weak self] nudges, direct in
+                self?.model.showNudges(nudges, direct: direct)
+                self?.presentOverlay()
+            }
+            nudgeMonitor = monitor
+        }
         installKeyMonitor()
         let saved = UserDefaults.standard.string(forKey: "relayShortcut")
             .flatMap(HotKeyController.Shortcut.init(rawValue:)) ?? .commandShiftSpace
@@ -52,7 +62,10 @@ final class RelayAppDelegate: NSObject, NSApplicationDelegate {
         model.shortcutDiagnostic = hotKey.diagnostic
         updateShortcutChecks()
         FileHandle.standardError.write(Data("Whoosh: global hotkey \(model.shortcutLabel) registered=\(hotKey.selected != nil) [\(hotKey.diagnostic)]\n".utf8))
-        showOverlay()
+        if NSAppleEventManager.shared().currentAppleEvent?
+            .paramDescriptor(forKeyword: AEKeyword(keyAEPropData))?.enumCodeValue != AEKeyword(keyAELaunchedAsLogInItem) {
+            showOverlay()
+        }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
@@ -65,8 +78,10 @@ final class RelayAppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard !isTerminating else { return .terminateLater }
         isTerminating = true
+        let polling = nudgeMonitor?.stop()
         Task {
             await model.shutdown()
+            await polling?.value
             sender.reply(toApplicationShouldTerminate: true)
         }
         return .terminateLater
@@ -149,15 +164,19 @@ final class RelayAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func showOverlay() {
-        // A fresh hotkey press always starts a new handoff, never the previous one's result screen.
-        if model.stage == .complete || model.stage == .review { model.startAgain() }
+        // Keep a notification handoff available to review after the destination opens.
+        if model.currentNudge == nil, model.stage == .complete || model.stage == .review { model.startAgain() }
         // Capture foreground context BEFORE Whoosh becomes active. It suggests a source app, never a thread.
         model.suggestSource(from: NSWorkspace.shared.frontmostApplication)
         model.refreshForPresentation()
-        if panel == nil { panel = makePanel() }
         model.nativeSearch = ""
-        model.errorMessage = nil
+        if model.currentNudge == nil { model.errorMessage = nil }
         model.ensureHighlight()
+        presentOverlay()
+    }
+
+    private func presentOverlay() {
+        if panel == nil { panel = makePanel() }
         NSApp.activate(ignoringOtherApps: true)
         panel?.makeKeyAndOrderFront(nil)
         pinTopEdge()

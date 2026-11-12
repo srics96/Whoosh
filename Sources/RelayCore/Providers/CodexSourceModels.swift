@@ -43,6 +43,7 @@ public struct CodexThreadSummary: Codable, Identifiable, Sendable {
     /// Unix timestamp in seconds, as reported by app-server.
     public let updatedAt: Double?
     public let status: CodexThreadActivity?
+    public let path: String?
     public var displayName: String { name?.isEmpty == false ? name! : (preview?.isEmpty == false ? String(preview!.prefix(90)) : "Untitled conversation") }
 }
 

@@ -119,7 +119,7 @@ public enum HandoffWriter {
                                      hasBrief: Bool = false, conventionNames: [String] = [],
                                      hasDiff: Bool = false) -> String {
         let briefLine = hasBrief
-            ? "Start with BRIEF.md in the handoff folder — a short state-of-the-work (goal, most recent request, recent exchange). Then open the transcript for detail."
+            ? "Start with BRIEF.md in the handoff folder — a short state-of-the-work (goal, most recent request, recent exchange). Look up specific details in the transcript only as needed."
             : "Read CHECKPOINT.md, then the transcript, and summarize the goal, decisions and next step before acting."
         let conventionsLine = conventionNames.isEmpty
             ? "No project convention files were found to carry over."

@@ -164,7 +164,10 @@ actor SyntheticTransport: CodexReadOnlyRPCTransport {
         let root = URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent(".build-audit/Whoosh-Model-Test-" + UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }
-        let terminal = RelayModel()
+        let contextSuite = "Whoosh-Synthetic-" + UUID().uuidString
+        let contextDefaults = UserDefaults(suiteName: contextSuite)!
+        defer { contextDefaults.removePersistentDomain(forName: contextSuite) }
+        let terminal = RelayModel(contextDefaults: contextDefaults)
         terminal.destinationSurface = .terminal
         terminal.projectURL = root
         terminal.outputURL = root.appendingPathComponent("handoffs")
@@ -200,11 +203,15 @@ actor SyntheticTransport: CodexReadOnlyRPCTransport {
         import {readFileSync, writeFileSync} from 'node:fs';
         const mode = readFileSync(new URL('./mode', import.meta.url), 'utf8');
         const request = JSON.parse(process.argv[2]);
-        const info = {sessionId:'11111111-1111-4111-8111-111111111111',summary:'Synthetic audit',lastModified:1};
+        const info = {sessionId:'11111111-1111-4111-8111-111111111111',summary:'Synthetic audit',lastModified:mode === 'active' ? Date.now() : 1};
+        if (mode === 'nudged') info.cwd = new URL('.', import.meta.url).pathname.replace(/\/$/, '').split('/').map(decodeURIComponent).join('/');
         if(request.action === 'list') {
           if(mode === 'list-fail') throw Error('Synthetic list failure');
           const sessions = mode === 'new-list' ? [info, {...info,sessionId:'22222222-2222-4222-8222-222222222222',summary:'New desktop test'}] : [info];
           console.log(JSON.stringify({sessions}));
+        }
+        else if (request.action === 'info') {
+          console.log(JSON.stringify({info}));
         }
         else if(mode === 'slow') {
           writeFileSync(new URL('./pid', import.meta.url), String(process.pid));
@@ -254,7 +261,56 @@ actor SyntheticTransport: CodexReadOnlyRPCTransport {
         try await settle(claude)
         precondition(claude.conversation != nil)
         await claude.shutdown()
+
+        let nudgeModel = RelayModel(nativeProvider: provider, claudeAdapter: ClaudeSessionAdapter(resourceDirectory: root), contextDefaults: contextDefaults)
+        let claudeChat = ContextChat(agent: .claude, id: UUID(uuidString: "11111111-1111-4111-8111-111111111111")!)
+        let codexChat = ContextChat(agent: .codex, id: UUID())
+        let a = ContextNudge(reading: ContextReading(chat: claudeChat, bytes: 500_000, modifiedAt: Date() - 120),
+                             project: "Synthetic Claude", advice: .omit(.paste))
+        let b = ContextNudge(reading: ContextReading(chat: codexChat, bytes: 800_000, modifiedAt: Date() - 120),
+                             project: "Synthetic Codex", advice: .switchToClaude(percent: 90))
+        let roundTrip = try JSONDecoder().decode([ContextNudge].self, from: JSONEncoder().encode([a, b]))
+        nudgeModel.showNudges(roundTrip, direct: false)
+        precondition(nudgeModel.flaggedNudges.map(\.chat) == [claudeChat, codexChat] && nudgeModel.conversation == nil)
+        nudgeModel.focusNudge(a)
+        precondition(nudgeModel.errorMessage?.contains("Reconnect") == true && !nudgeModel.isBusy)
+        contextDefaults.set(true, forKey: "blinkClaudeConnectionApproved")
+        try "active".write(to: root.appendingPathComponent("mode"), atomically: false, encoding: .utf8)
+        nudgeModel.showNudges([a], direct: true)
+        try await settle(nudgeModel)
+        precondition(nudgeModel.errorMessage?.contains("active again") == true && nudgeModel.prepared == nil)
+        try "nudged".write(to: root.appendingPathComponent("mode"), atomically: false, encoding: .utf8)
+        nudgeModel.destinationSurface = .terminal
+        nudgeModel.outputURL = root.appendingPathComponent("nudge-handoffs")
+        nudgeModel.showNudges([a], direct: false)
+        try await settle(nudgeModel)
+        precondition(nudgeModel.highlightedID == claudeChat.id.uuidString.lowercased()
+            && nudgeModel.destination == .claude && nudgeModel.conversation == nil)
+        nudgeModel.activatePrimary()
+        try await settle(nudgeModel)
+        let fromBody = nudgeModel.prepared!
+        let saved = nudgeModel.contextSavedTotal
+        precondition(nudgeModel.stage == .review && nudgeModel.reviewBrief.contains("skips one large paste"))
+        precondition(nudgeModel.contextSavings?.original == 125_000 && saved > 0)
+        let archiveText = try String(contentsOf: fromBody.directory.appendingPathComponent(fromBody.manifest.archiveRelativePath), encoding: .utf8)
+        precondition(archiveText == "Synthetic conversation only")
+        nudgeModel.showNudges([a], direct: true)
+        try await settle(nudgeModel)
+        precondition(nudgeModel.stage == .review && nudgeModel.prepared?.directory != fromBody.directory)
+        precondition(nudgeModel.contextSavedTotal > saved)
+        precondition(RelayModel(contextDefaults: contextDefaults).contextSavedTotal == nudgeModel.contextSavedTotal)
+        // Route a Codex nudge through the existing connection without starting a real CLI or agent.
+        contextDefaults.set(true, forKey: "blinkCodexConnectionApproved")
+        nudgeModel.chooseSource(.codex)
+        nudgeModel.nativeConnected = true
+        await transport.configureList([codexChat.id.uuidString.lowercased()])
+        nudgeModel.showNudges([b], direct: false)
+        try await settle(nudgeModel)
+        precondition(nudgeModel.source == .codex && nudgeModel.destination == .claude
+            && nudgeModel.highlightedID == codexChat.id.uuidString.lowercased() && nudgeModel.conversation == nil)
+        await nudgeModel.shutdown()
         await model.shutdown()
+        print("PASS grouped flags, approved notification body routing, changed source, direct terminal preparation and persisted savings")
         print("PASS Claude cancellation reaps owned helper; subsequent selection works")
     }
 }
