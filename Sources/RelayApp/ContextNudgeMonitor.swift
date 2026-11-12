@@ -97,7 +97,7 @@ final class ContextNudgeMonitor: NSObject, UNUserNotificationCenterDelegate {
         let alert = NSAlert()
         alert.messageText = "Start Whoosh at login so nudges keep working?"
         alert.addButton(withTitle: "Start at Login")
-        alert.addButton(withTitle: "Not Now")
+        alert.addButton(withTitle: "Not Now").keyEquivalent = "\u{1b}"
         if alert.runModal() == .alertFirstButtonReturn {
             do {
                 try SMAppService.mainApp.register()
@@ -262,7 +262,7 @@ final class ContextNudgeMonitor: NSObject, UNUserNotificationCenterDelegate {
             if !hadTip && policy.hasSnoozeTip {
                 let content = UNMutableNotificationContent()
                 content.title = "Whoosh"
-                content.body = "Not finding these useful? You can turn heavy-chat nudges off in Options."
+                content.body = "Turn off heavy-chat nudges in Options."
                 try? await center.add(UNNotificationRequest(identifier: Self.tip, content: content, trigger: nil))
             }
         case UNNotificationDefaultActionIdentifier, Self.handoff:

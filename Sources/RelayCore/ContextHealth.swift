@@ -38,11 +38,11 @@ public enum ContextAdvice: Equatable, Codable, Sendable {
     public var message: String {
         switch self {
         case .switchToClaude(let percent):
-            return "You’re at \(percent)% of your Codex limit. Switch to Claude to keep going (Claude usage not checked)."
+            return "Codex quota: \(percent)% used. Try Claude (quota unknown)."
         case .omit(let bloat):
-            return "Most of this chat appears to be \(bloat.label). Start fresh and leave it out."
+            return "Start fresh without \(bloat.label)."
         case .freshSession:
-            return "This chat is heavy. Start fresh with a handoff to save your quota."
+            return "Start fresh with a handoff."
         }
     }
 }
