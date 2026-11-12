@@ -23,8 +23,12 @@ public struct ResumeDigest: Sendable {
         return t.count <= n ? t : String(t.prefix(n)) + "…"
     }
 
-    public init(title: String, messages: [ResumeMessage]) {
+    public init(title: String, messages: [ResumeMessage], omission: ContextBloat? = nil, sourceBytes: Int? = nil) {
         let cleaned = messages
+            .filter { message in
+                guard omission == .paste, message.role == "user", let sourceBytes else { return true }
+                return !ContextLog.isLargePaste(message.text, minimumBytes: sourceBytes / 4)
+            }
             .map { ResumeMessage(role: $0.role, text: $0.text.trimmingCharacters(in: .whitespacesAndNewlines)) }
             .filter { !$0.text.isEmpty }
         let users = cleaned.filter { $0.role == "user" }
@@ -35,13 +39,22 @@ public struct ResumeDigest: Sendable {
 
         goal = Self.clip(firstUser ?? title, 500)
         if let lastUser, firstUser != lastUser {
-            nextStep = "Continue from the user's most recent request:\n\"" + Self.clip(lastUser, 700) + "\"\nRead BRIEF.md and the transcript, confirm the current project state, then proceed."
+            nextStep = "Continue from the user's most recent request:\n\"" + Self.clip(lastUser, 700) + "\"\nRead BRIEF.md and confirm the current project state. Look up specific details in the transcript if needed."
         } else {
             nextStep = "Resume the work in progress described in BRIEF.md. Confirm the current project state before changing anything; if the next action is unclear, ask."
         }
 
         // Render the most recent exchange (what's freshest matters most for resumption).
         let tail = cleaned.suffix(6)
+        let decisionPrefixes = ["decision:", "decided ", "we agreed ", "we chose ", "do not ", "must "]
+        let earlier = cleaned.dropLast(tail.count).compactMap { message -> String? in
+            message.text.split(whereSeparator: \.isNewline).lazy.map {
+                String($0).trimmingCharacters(in: CharacterSet.whitespaces.union(CharacterSet(charactersIn: "-*")))
+            }.first { line in decisionPrefixes.contains(where: { line.lowercased().hasPrefix($0) }) }
+        }.suffix(4).map { "- " + Self.clip($0, 450) }.joined(separator: "\n")
+        let omissionNote = omission.map {
+            "This brief skips \($0.label). Its source is preserved in the archive; ask the user or look up only the relevant part if needed."
+        }
         let recent = tail.map { "**\($0.role == "user" ? "User" : "Assistant")**\n\(Self.clip($0.text, 1500))" }
             .joined(separator: "\n\n")
         brief = """
@@ -57,6 +70,11 @@ public struct ResumeDigest: Sendable {
 
         ## Assistant's last response
         \(lastAssistant.map { Self.clip($0, 1500) } ?? "None captured.")
+
+        ## Earlier decision excerpts
+        \(earlier.isEmpty ? "None detected. Look up specific decisions in the archive as needed." : earlier)
+
+        \(omissionNote ?? "")
 
         ## Recent exchange
         \(recent.isEmpty ? "None captured." : recent)

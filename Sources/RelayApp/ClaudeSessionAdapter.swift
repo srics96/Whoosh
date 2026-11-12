@@ -25,7 +25,8 @@ struct ClaudeSessionAdapter: Sendable {
         guard let resourceDirectory else { return false }
         return FileManager.default.fileExists(atPath: resourceDirectory.appendingPathComponent("runtime.json").path)
     }
-    func call(action: String, id: String? = nil, dir: String? = nil, offset: Int = 0) async throws -> ClaudeAdapterResponse {
+    func call(action: String, id: String? = nil, dir: String? = nil, offset: Int = 0,
+              omitPasteBytes: Int? = nil, requireIdle: Bool = false) async throws -> ClaudeAdapterResponse {
         guard let resourceDirectory else {
             throw RelayError.invalidInput("Local Claude Code connection is not installed in this build.")
         }
@@ -43,6 +44,8 @@ struct ClaudeSessionAdapter: Sendable {
         }
         var request: [String:Any] = ["action":action,"offset":offset]
         request["id"] = id; request["dir"] = dir
+        request["omitPasteBytes"] = omitPasteBytes
+        if requireIdle { request["requireIdle"] = true }
         let input = try JSONSerialization.data(withJSONObject: request)
         return try await CancellableWork.run {
             let process = Process()
@@ -71,7 +74,7 @@ struct ClaudeSessionAdapter: Sendable {
                 throw NSError(domain:"Whoosh",code:3,userInfo:[NSLocalizedDescriptionKey:"Claude connection timed out after 180 seconds (\(phase)). No agent was started."])
             }
             guard process.terminationStatus == 0 else {
-                let allowed = ["Session identity mismatch", "Project mismatch", "Source changed; stop it and select again", "No readable messages", "Unstable pagination", "History exceeds safe capture size", "Invalid session", "Unsupported operation", "Reader unavailable"]
+                let allowed = ["Session identity mismatch", "Project mismatch", "Source changed; stop it and select again", "Chat is active; wait until idle", "No readable messages", "Unstable pagination", "History exceeds safe capture size", "Invalid session", "Unsupported operation", "Reader unavailable"]
                 let diagnosticText = (try? String(contentsOf: diagnostic, encoding: .utf8)) ?? ""
                 let reason = allowed.first { diagnosticText.contains("BLINK:error:" + $0) } ?? "Reader unavailable"
                 throw NSError(domain:"Whoosh",code:2,userInfo:[NSLocalizedDescriptionKey:"Claude Code: \(reason). No agent was started."])

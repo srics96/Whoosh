@@ -86,11 +86,29 @@ final class RelayModel: ObservableObject {
         // and gets the default highlight — Whoosh "lands" on where you are without reading the window.
         let rows = nativeThreads
             .filter { includeOwnedTestChats || !fixtures.contains($0.id) }
-            .sorted { ($0.updatedAt ?? .distantPast) > ($1.updatedAt ?? .distantPast) }
-        return query.isEmpty ? rows : rows.filter { $0.title.localizedCaseInsensitiveContains(query) || $0.projectName.localizedCaseInsensitiveContains(query) }
+        let ordered = rows.sorted {
+            let first = matchesNudge($0.id)
+            let second = matchesNudge($1.id)
+            if first != second { return first }
+            return ($0.updatedAt ?? .distantPast) > ($1.updatedAt ?? .distantPast)
+        }
+        return query.isEmpty ? ordered : ordered.filter { $0.title.localizedCaseInsensitiveContains(query) || $0.projectName.localizedCaseInsensitiveContains(query) }
     }
     @Published var nativeRateSummary: [String] = []
     @Published var nativeRateCheckedAt: Date?
+    @Published var contextNudgesEnabled = false
+    @Published var contextNudgeOptionsNote = ""
+    @Published var flaggedNudges: [ContextNudge] = []
+    @Published private(set) var currentNudge: ContextNudge?
+    @Published private(set) var contextSavings: ContextSavings?
+    @Published private(set) var lastContextSavings: ContextSavings?
+    @Published private(set) var contextSavedTotal: Int
+    private let contextDefaults: UserDefaults
+    var onNudgesChanged: ((Bool) -> Void)?
+    var onNudgeSelected: (() -> Void)?
+    var reviewBrief: String { currentNudge != nil ? resumeBrief : "" }
+    private var openNudgeDraftImmediately = false
+
     @Published var completionTitle = "Handoff prepared"
     @Published var completionDetail = ""
     @Published var codexApplicationURL: URL?
@@ -112,9 +130,12 @@ final class RelayModel: ObservableObject {
     var claudeAdapterAvailable: Bool { claudeAdapter.available }
 
     init(nativeProvider: CodexNativeSourceProvider = CodexNativeSourceProvider(),
-         claudeAdapter: ClaudeSessionAdapter = ClaudeSessionAdapter()) {
+         claudeAdapter: ClaudeSessionAdapter = ClaudeSessionAdapter(),
+         contextDefaults: UserDefaults = .standard) {
         self.nativeProvider = nativeProvider
         self.claudeAdapter = claudeAdapter
+        self.contextDefaults = contextDefaults
+        contextSavedTotal = max(0, contextDefaults.integer(forKey: "whooshContextSavedTotal"))
     }
 
     var isBusy: Bool { stage == .preparing || stage == .departing || stage == .opening || nativeBusy || importBusy }
@@ -157,6 +178,7 @@ final class RelayModel: ObservableObject {
     func chooseSource(_ app: AgentApp) {
         guard !isBusy else { return }
         hasExplicitSource = true
+        currentNudge = nil
         source = app
         // Switching which agent you read defaults back to a fresh session of that same agent.
         destination = app
@@ -200,7 +222,9 @@ final class RelayModel: ObservableObject {
     /// Context-aware Return: reset after a finished handoff, connect if needed, else fly the highlighted chat.
     func activatePrimary() {
         guard !isBusy else { return }
+        if stage == .review, currentNudge != nil, destinationSurface == .desktop { openReviewedNudgeDraft(); return }
         if stage == .complete || stage == .review { startAgain(); return }
+        if conversation != nil, currentNudge != nil { prepare(); return }
         if !nativeConnected { reconnectNativeCodex(); return }
         flyHighlighted()
     }
@@ -210,6 +234,7 @@ final class RelayModel: ObservableObject {
         guard nativeConnected, !isBusy else { return }
         ensureHighlight()
         guard let id = highlightedID else { return }
+        if !matchesNudge(id) { currentNudge = nil }
         autoFly = true
         selectNativeThread(id)
     }
@@ -217,6 +242,7 @@ final class RelayModel: ObservableObject {
     func invalidate() {
         guard stage != .preparing && stage != .departing && stage != .opening else { return }
         prepared = nil
+        contextSavings = nil
         transferApproved = false
         clipboardNotice = nil
         sourceStopped = sourceIdleKnown
@@ -254,6 +280,7 @@ final class RelayModel: ObservableObject {
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
         guard panel.runModal() == .OK, let url = panel.url else { return }
+        currentNudge = nil
         invalidate()
         importBusy = true
         nativeSelectionTask = Task {
@@ -297,6 +324,7 @@ final class RelayModel: ObservableObject {
         let instructionData = Data((goal + nextStep + userInstruction + decisions + verification).utf8)
         let captureDiff = includeDiff
         let brief = resumeBrief
+        let estimatedOriginal = currentNudge?.estimatedTokens ?? ContextHealth.estimatedTokens(bytes: conversation.byteCount)
         errorMessage = nil
         transferApproved = false
         stage = .preparing
@@ -319,6 +347,11 @@ final class RelayModel: ObservableObject {
                 }
                 try Task.checkCancellation()
                 prepared = result
+                let savings = ContextSavings(original: estimatedOriginal, bootstrap: result.bootstrap, brief: brief)
+                contextSavings = savings
+                lastContextSavings = savings
+                contextSavedTotal += min(Int.max - contextSavedTotal, savings.saved)
+                contextDefaults.set(contextSavedTotal, forKey: "whooshContextSavedTotal")
                 refreshDestinationCapabilities()
                 stage = .review
                 if continueToDestination {
@@ -511,9 +544,120 @@ final class RelayModel: ObservableObject {
 
     func startAgain() {
         hasExplicitSource = false
+        currentNudge = nil
+        openNudgeDraftImmediately = false
         invalidate()
         clearConversation()
         goal = ""; nextStep = ""; decisions = ""; verification = ""
+    }
+
+    func matchesNudge(_ id: String) -> Bool {
+        guard let nudge = currentNudge else { return false }
+        return nudge.chat.agent == (source == .codex ? .codex : .claude) && UUID(uuidString: id) == nudge.chat.id
+    }
+
+    func showNudges(_ nudges: [ContextNudge], direct: Bool) {
+        guard !isBusy else {
+            errorMessage = "Finish the current handoff, then choose a flagged chat."
+            flaggedNudges = nudges
+            return
+        }
+        startAgain()
+        nativeSearch = ""
+        highlightedID = nil
+        if nudges.count == 1, let nudge = nudges.first {
+            flaggedNudges = []
+            focusNudge(nudge, direct: direct)
+        } else {
+            flaggedNudges = nudges
+        }
+    }
+
+    func focusNudge(_ nudge: ContextNudge, direct: Bool = false) {
+        guard !isBusy else { return }
+        let agent: AgentApp = nudge.chat.agent == .codex ? .codex : .claude
+        guard contextDefaults.bool(forKey: agent == .codex ? "blinkCodexConnectionApproved" : "blinkClaudeConnectionApproved") else {
+            errorMessage = "Reconnect this source in Whoosh before opening the chat."
+            return
+        }
+        let reuseCodex = source == .codex && nativeConnected
+        invalidate()
+        clearConversation()
+        nativeSearch = ""
+        nativeBusy = true // Do not start a parallel picker refresh while resolving this notification.
+        source = agent
+        if case .switchToClaude = nudge.advice { destination = .claude } else { destination = agent }
+        hasExplicitSource = true
+        currentNudge = nudge
+        openNudgeDraftImmediately = direct
+        nativeSelectionTask = Task {
+            var match: NativeThread?
+            do {
+                if agent == .claude {
+                    let info = try await claudeAdapter.call(action: "info", id: nudge.chat.id.uuidString.lowercased()).info
+                    if let info, UUID(uuidString: info.sessionId) == nudge.chat.id {
+                        let modified = Date(timeIntervalSince1970: info.lastModified / 1000)
+                        guard Date().timeIntervalSince(modified) >= ContextHealth.idle else {
+                            throw RelayError.invalidInput("This chat is active again. Wait until it is idle before handing it off.")
+                        }
+                        match = NativeThread(id: info.sessionId, title: info.summary, preview: "", directory: info.cwd, updatedAt: modified)
+                    }
+                } else {
+                    if !reuseCodex {
+                        guard let executable = try await CancellableWork.run({ CodexInstallation.detect() }) else {
+                            throw RelayError.invalidInput("The approved Codex helper is no longer available.")
+                        }
+                        try await readCodexConnection(executable: executable)
+                    }
+                    var cursor: String?
+                    for _ in 0..<4 {
+                        let page = try await nativeProvider.listThreads(cursor: cursor)
+                        if let thread = page.threads.first(where: { UUID(uuidString: $0.id) == nudge.chat.id }) {
+                            guard thread.status?.type != "active",
+                                  thread.updatedAt.map({ Date().timeIntervalSince1970 - $0 >= ContextHealth.idle }) ?? true else {
+                                throw RelayError.invalidInput("This chat is active again. Wait until it is idle before handing it off.")
+                            }
+                            match = NativeThread(id: thread.id, title: thread.displayName, preview: thread.preview ?? "",
+                                                 directory: thread.cwd, updatedAt: thread.updatedAt.map(Date.init(timeIntervalSince1970:)))
+                            break
+                        }
+                        guard let next = page.nextCursor, next != cursor else { break }
+                        cursor = next
+                    }
+                }
+                try Task.checkCancellation()
+                guard let row = match else { throw RelayError.invalidInput("This chat is no longer available in the connected source.") }
+                if !nativeThreads.contains(where: { $0.id == row.id }) { nativeThreads.insert(row, at: 0) }
+                nativeConnected = true
+                highlightedID = row.id
+                highlightByKeyboard = true
+                onNudgeSelected?()
+            } catch {
+                currentNudge = nil
+                openNudgeDraftImmediately = false
+                errorMessage = error is CancellationError ? "Chat selection cancelled." : error.localizedDescription
+                match = nil
+            }
+            nativeBusy = false
+            nativeSelectionTask = nil
+            if direct, match != nil { flyHighlighted() }
+        }
+    }
+
+    func openReviewedNudgeDraft() {
+        guard currentNudge != nil, stage == .review, sourceStopped, destinationSurface == .desktop else { return }
+        transferApproved = true
+        if destination == .codex { launchCodex() } else { launchClaude() }
+    }
+
+    private func finishPickedChat() {
+        if currentNudge != nil {
+            let direct = openNudgeDraftImmediately
+            openNudgeDraftImmediately = false
+            prepare(continueToDestination: direct)
+        } else {
+            continueHandoff()
+        }
     }
 
     var canRefreshConversations: Bool {
@@ -671,16 +815,18 @@ final class RelayModel: ObservableObject {
         clearConversation()
         nativeBusy = true
         selectingThread = nativeThreads.first { $0.id == id }
+        let nudge = matchesNudge(id) ? currentNudge : nil
         nativeSelectionTask = Task {
             var ok = false
             do {
-                let result = try await nativeProvider.readThread(id: id)
+                let result = try await nativeProvider.readThread(id: id, minimumIdle: nudge == nil ? nil : ContextHealth.idle)
                 try Task.checkCancellation()
                 let (archive, digest, blocked) = try await CancellableWork.run {
                     let archive = try ImportedConversation(fileName: "codex-selected-responses.jsonl", data: result.rawResponsesJSONL,
                                                            preservationNotice: result.preservationNotice, isPartial: result.isPartial)
                     let digest = ResumeDigest(title: result.summary.displayName,
-                        messages: result.messages.map { ResumeMessage(role: $0.role.rawValue, text: $0.text) })
+                        messages: result.messages.map { ResumeMessage(role: $0.role.rawValue, text: $0.text) },
+                        omission: nudge?.advice.omission, sourceBytes: nudge.map { $0.estimatedTokens * 4 })
                     return (archive, digest, try SensitiveContentScreen.scan(archive.data))
                 }
                 clearConversation()
@@ -713,7 +859,7 @@ final class RelayModel: ObservableObject {
                 errorMessage = "Possible sensitive data found. Review and redact the history before continuing."
             } else if ok && projectURL == nil {
                 errorMessage = "This conversation’s project folder is missing. Choose a folder explicitly; no home-directory fallback was used."
-            } else if ok && fly { continueHandoff() }
+            } else if ok && fly { finishPickedChat() }
         }
     }
 
@@ -744,17 +890,20 @@ final class RelayModel: ObservableObject {
     private func selectClaude(_ id: String) {
         guard nativeConnected, !nativeBusy, let row = nativeThreads.first(where: { $0.id == id }) else { return }
         invalidate(); clearConversation(); selectingThread = row; nativeBusy = true
+        let nudge = matchesNudge(id) ? currentNudge : nil
         nativeSelectionTask = Task {
             var ok = false
             do {
-                let result = try await claudeAdapter.call(action: "read", id: id, dir: row.directory)
+                let result = try await claudeAdapter.call(action: "read", id: id, dir: row.directory,
+                    omitPasteBytes: nudge?.advice.omission == .paste ? nudge.map { $0.estimatedTokens * 4 } : nil,
+                    requireIdle: nudge != nil)
                 guard let info = result.info, let text = result.archive, let notice = result.notice else {
                     throw RelayError.invalidInput("No readable Claude Code history returned.")
                 }
                 let (archive, digest, blocked) = try await CancellableWork.run {
                     let archive = try ImportedConversation(fileName:"claude-code-api.jsonl", data:Data(text.utf8), preservationNotice:notice, isPartial:true)
                     let digest = ResumeDigest(title: info.summary,
-                        messages: (result.digest ?? []).map { ResumeMessage(role: $0.role, text: $0.text) })
+                        messages: (result.digest ?? []).map { ResumeMessage(role: $0.role, text: $0.text) }, omission: nudge?.advice.omission)
                     return (archive, digest, try SensitiveContentScreen.scan(archive.data))
                 }
                 clearConversation(); selectingThread = row; selectedClaudeInfo = info; nativeSelectedID = id; conversation = archive
@@ -772,7 +921,7 @@ final class RelayModel: ObservableObject {
                 errorMessage = "Possible sensitive data found. Review and redact the history before continuing."
             } else if ok && projectURL == nil {
                 errorMessage = "This conversation’s project folder is missing. Choose a folder explicitly; no home-directory fallback was used."
-            } else if ok && fly { continueHandoff() }
+            } else if ok && fly { finishPickedChat() }
         }
     }
 
@@ -822,6 +971,7 @@ final class RelayModel: ObservableObject {
     }
 
     func disconnectNativeCodex() {
+        currentNudge = nil
         sourceGeneration = UUID()
         UserDefaults.standard.set(false, forKey: source == .codex ? "blinkCodexConnectionApproved" : "blinkClaudeConnectionApproved")
         autoConnectionAttempted = true

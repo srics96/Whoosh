@@ -100,6 +100,14 @@ struct RelayOverlay: View {
                 Button("Locate Codex helper…") { model.connectNativeCodex() }
                 Toggle("Reduce motion", isOn: $model.reduceMotionInWhoosh)
                 Toggle("Include Whoosh test chats", isOn: $model.includeOwnedTestChats)
+                Divider()
+                Toggle("Heavy-chat nudges", isOn: Binding(get: { model.contextNudgesEnabled },
+                    set: { model.onNudgesChanged?($0) }))
+                if !model.contextNudgeOptionsNote.isEmpty {
+                    Text(model.contextNudgeOptionsNote)
+                }
+                if let latest = model.lastContextSavings { Text(latest.message) }
+                Text("Estimated tokens saved: ~\(model.contextSavedTotal.formatted())")
             } label: {
                 Image(systemName: "slider.horizontal.3").font(.system(size: 13, weight: .semibold))
                     .frame(width: 30, height: 30)
@@ -166,6 +174,14 @@ struct RelayOverlay: View {
         if let error = model.errorMessage {
             banner(error)
         }
+        if !model.flaggedNudges.isEmpty {
+            flaggedChats
+        }
+        if let nudge = model.currentNudge {
+            Label(nudge.advice.message, systemImage: "bolt.circle")
+                .font(.caption).frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 24).padding(.top, 12)
+        }
         if model.conversation != nil {
             VStack(spacing: 10) {
                 if model.projectURL == nil {
@@ -173,7 +189,9 @@ struct RelayOverlay: View {
                     Button("Choose project folder…") { model.chooseFolder(output: false) }
                 } else {
                     Text(model.projectURL!.path).font(.caption).lineLimit(2)
-                    Button("Prepare selected conversation") { model.continueHandoff() }.disabled(!model.canPrepare)
+                    Button("Prepare selected conversation") {
+                        if model.currentNudge != nil { model.prepare() } else { model.continueHandoff() }
+                    }.disabled(!model.canPrepare)
                 }
             }.padding()
         }
@@ -186,6 +204,34 @@ struct RelayOverlay: View {
         }
     }
 
+    private var flaggedChats: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Label("Heavy chats", systemImage: "bolt.circle").font(.caption.bold())
+                Spacer()
+                Button("Clear flags") { model.flaggedNudges = [] }.buttonStyle(.plain).font(.caption)
+            }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(model.flaggedNudges, id: \.chat) { nudge in
+                        Button {
+                            model.focusNudge(nudge)
+                        } label: {
+                            let agent = nudge.chat.agent == .claude ? "Claude Code" : "Codex"
+                            HStack {
+                                Text(nudge.project).lineLimit(1)
+                                Spacer()
+                                Text("\(agent) · ~\(nudge.estimatedTokens.formatted()) tokens")
+                                    .foregroundStyle(.white.opacity(0.65))
+                            }.padding(6).contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain).help(nudge.advice.message)
+                    }
+                }
+            }.frame(maxHeight: 115)
+        }.padding(.horizontal, 24).padding(.top, 12)
+    }
+
     private var resultList: some View {
         ScrollViewReader { proxy in
             ScrollView {
@@ -193,7 +239,8 @@ struct RelayOverlay: View {
                     ForEach(rows) { row in
                         ConversationRow(row: row,
                                         highlighted: row.id == model.highlightedID,
-                                        destination: model.destination.displayName)
+                                        destination: model.destination.displayName,
+                                        heavyEstimate: model.matchesNudge(row.id) ? model.currentNudge?.estimatedTokens : nil)
                             .id(row.id)
                             .contentShape(Rectangle())
                             .onTapGesture { model.highlightByKeyboard = false; model.highlightedID = row.id; model.flyHighlighted() }
@@ -269,6 +316,22 @@ struct RelayOverlay: View {
                 Text(flightSubtitle).font(.system(size: 13)).foregroundStyle(.white.opacity(0.6))
                     .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true).frame(maxWidth: 460)
             }
+            if let savings = model.contextSavings {
+                VStack(spacing: 3) {
+                    Text(savings.message)
+                    Text("Running estimate: ~\(model.contextSavedTotal.formatted()) tokens saved")
+                        .foregroundStyle(.white.opacity(0.6))
+                }.font(.caption)
+                .help("Compares estimated original size with the bootstrap and brief. Archive lookups can add context.")
+            }
+            if !model.reviewBrief.isEmpty, [.review, .complete].contains(model.stage) {
+                DisclosureGroup("Review handoff brief") {
+                    ScrollView {
+                        Text(model.reviewBrief).font(.caption).textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }.frame(height: 130)
+                }.frame(maxWidth: 520)
+            }
             if model.stage == .complete {
                 Button("New handoff  ↵") { model.startAgain() }.buttonStyle(RelaySecondaryButton())
             } else if model.stage == .review {
@@ -284,6 +347,12 @@ struct RelayOverlay: View {
                         if let notice = model.clipboardNotice { Text(notice).font(.caption).multilineTextAlignment(.center) }
                     }
                 }
+                if model.destinationSurface == .desktop, model.currentNudge != nil {
+                    HStack {
+                        Button("Open unsent draft") { model.openReviewedNudgeDraft() }.buttonStyle(RelayPrimaryButton())
+                        Button("Show files") { model.revealFiles() }
+                    }
+                }
                 Button("Back to chats") { model.startAgain() }.buttonStyle(RelaySecondaryButton())
             }
         }
@@ -294,7 +363,7 @@ struct RelayOverlay: View {
     private var flightTitle: String {
         switch model.stage {
         case .complete: return model.completionTitle
-        case .review: return model.destinationSurface == .terminal ? "Ready for the terminal" : "Draft needs attention"
+        case .review: return model.destinationSurface == .terminal ? "Ready for the terminal" : (model.currentNudge == nil ? "Draft needs attention" : "Review your handoff")
         case .preparing: return model.phase.rawValue
         case .opening: return "Opening a draft in " + model.destination.displayName
         default: return model.nativeBusy ? model.sourceProgressTitle : "Preparing your selected conversation…"
@@ -367,6 +436,7 @@ private struct ConversationRow: View {
     let row: RelayModel.NativeThread
     let highlighted: Bool
     let destination: String
+    let heavyEstimate: Int?
     @State private var hovered = false
 
     var body: some View {
@@ -375,6 +445,10 @@ private struct ConversationRow: View {
                 .foregroundStyle(highlighted ? WhooshGeometry.teal : .white.opacity(0.4))
                 .frame(width: 22)
             VStack(alignment: .leading, spacing: 3) {
+                if let heavyEstimate {
+                    Text("Heavy · ~\(heavyEstimate.formatted()) tokens").font(.caption)
+                        .foregroundStyle(WhooshGeometry.teal)
+                }
                 Text(row.title.isEmpty ? "Untitled conversation" : row.title)
                     .font(.system(size: 15, weight: .medium)).lineLimit(1).truncationMode(.tail)
                 HStack(spacing: 6) {

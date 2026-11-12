@@ -38,3 +38,17 @@ console.log('PASS oversized history rejected before transfer');
 const unicode={...actual,getSessionInfo:async()=>({...await actual.getSessionInfo(id,{dir}),cwd:'/tmp/caf\u00e9'})};
 assert.ok((await handle(unicode,{action:'read',id,dir:'/tmp/cafe\u0301'})).archive);
 console.log('PASS equivalent Unicode project paths accepted without accepting a different project');
+const hugePaste = ('log-marker-' + 'x'.repeat(162) + '\n').repeat(3000);
+const seeded = [{...rows[0], message:{role:'user',content:[{type:'text',text:hugePaste}]}},
+  {...rows[1], message:{role:'assistant',content:[{type:'text',text:'Decision: Keep the archive format.'}]}},
+  ...rows.slice(2,20)];
+const idleInfo = {sessionId:id, cwd:dir, lastModified:Date.now()-120_000, fileSize:hugePaste.length};
+const idle = {...actual, getSessionInfo:async()=>idleInfo,
+  getSessionMessages:async(_id,{offset,limit})=>seeded.slice(offset,offset+limit)};
+const nudged = await handle(idle,{action:'read',id,dir,requireIdle:true,omitPasteBytes:hugePaste.length});
+assert.match(nudged.archive,/log-marker/);
+assert.doesNotMatch(JSON.stringify(nudged.digest),/log-marker/);
+assert.match(JSON.stringify(nudged.digest),/Keep the archive format/);
+await assert.rejects(handle({...idle,getSessionInfo:async()=>({...idleInfo,lastModified:Date.now()})},
+  {action:'read',id,dir,requireIdle:true}),/Chat is active/);
+console.log('PASS idle nudge capture leaves large paste out of digest, preserves archive, and keeps older decisions');

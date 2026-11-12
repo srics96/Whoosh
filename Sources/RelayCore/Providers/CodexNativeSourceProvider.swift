@@ -62,7 +62,7 @@ public actor CodexNativeSourceProvider {
 
     /// Reads only an ID explicitly returned by this connection's picker. Bounded, oldest-first pages.
     /// A partial result MUST remain visibly marked partial in the calling UI and archive manifest.
-    public func readThread(id: String, maxPages: Int? = nil, pageSize: Int = 100, timeBudgetSeconds: Double = 240) async throws -> CodexSelectedThread {
+    public func readThread(id: String, maxPages: Int? = nil, pageSize: Int = 100, timeBudgetSeconds: Double = 240, minimumIdle: TimeInterval? = nil) async throws -> CodexSelectedThread {
         let session = try requireConnection()
         guard listedIDs.contains(id) else { throw CodexSourceError.notListed }
         let deadline = Date().addingTimeInterval(timeBudgetSeconds.isFinite ? max(0, min(timeBudgetSeconds, 240)) : 240)
@@ -73,6 +73,9 @@ public actor CodexNativeSourceProvider {
         let summary = try thread.decoded(as: CodexThreadSummary.self)
         guard summary.id == id else { throw CodexSourceError.invalidResponse("thread ID did not match selection") }
         guard summary.status?.type != "active" else { throw CodexSourceError.invalidResponse("The selected source is active. Stop it before capturing history.") }
+        if let minimumIdle, let updated = summary.updatedAt, Date().timeIntervalSince1970 - updated < minimumIdle {
+            throw CodexSourceError.invalidResponse("The selected chat was recently updated. Wait until it is idle.")
+        }
         // thread/items/list returns full persisted items across every turn when turnId is omitted.
         // Unlike thread/turns/list it has no default summary view. Follow every cursor or mark partial.
         var raw = metadata.rawLine
@@ -133,7 +136,7 @@ public actor CodexNativeSourceProvider {
         }
     }
 
-    /// Call only from a user-requested usage refresh. No login, token extraction, reset, or billing action.
+    /// Requires an approved connection. No login, token extraction, reset, or billing action.
     public func readRateLimits() async throws -> CodexRateLimitsSnapshot {
         let session = try requireConnection()
         let response = try await transport.request(.rateLimitsRead, params: [:])

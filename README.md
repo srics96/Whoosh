@@ -57,7 +57,10 @@ project instructions and a Git snapshot. Read Claude desktop Code histories with
 setting up Claude CLI; Codex reading uses its signed CLI, including the copy bundled
 with the Codex app.
 
-[How handoffs work](docs/handoffs.md) · [Build and validation](docs/development.md)
+Turn on **Options → Heavy-chat nudges** for alerts on large, idle local chats
+and advice on when to start a fresh session or switch agents.
+
+[How handoffs work](docs/handoffs.md) · [Context health nudges](docs/context-health.md) · [Build and validation](docs/development.md)
 
 ## License
 

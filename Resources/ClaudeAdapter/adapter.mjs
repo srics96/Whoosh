@@ -17,6 +17,7 @@ export async function handle(sdk, request) {
   if (dir && (!before.cwd || resolve(dir).normalize('NFC') !== resolve(before.cwd).normalize('NFC'))) throw Error('Project mismatch');
   if(request.action==='info') return {info:before};
   if(request.action!=='read') throw Error('Unsupported operation');
+  if (request.requireIdle && (!Number.isFinite(before.lastModified) || Date.now() - before.lastModified < 60_000)) throw Error('Chat is active; wait until idle');
   const messages=[]; const seen=new Set(); let exhausted=false; let approxBytes=0;
   const captureCap=240*1024*1024;
   for(let offset=0;offset<200000;offset+=100) {
@@ -40,13 +41,25 @@ export async function handle(sdk, request) {
     let text = '';
     if (typeof content === 'string') text = content;
     else if (Array.isArray(content)) text = content.filter(b=>b && typeof b.text==='string' && (b.type===undefined||b.type==='text')).map(b=>b.text).join('\n');
-    return { role: role==='user'?'user':'assistant', text: (text||'').trim().slice(0, 2000) };
+    if (role === 'user' && Number.isSafeInteger(request.omitPasteBytes) &&
+        Buffer.byteLength(text) >= Math.max(16384, Math.floor(request.omitPasteBytes / 4))) {
+      let lines = 0;
+      for (let pos = text.indexOf('\n'); pos !== -1; pos = text.indexOf('\n', pos + 1)) {
+        if (++lines === 100) return {role: 'user', text: ''};
+      }
+    }
+    return { role: role==='user'?'user':'assistant', text: text.trim().slice(0, 2000) };
   };
   const normalized = messages.map(norm).filter(x=>x.text);
   const firstUser = normalized.find(x=>x.role==='user');
   const digest = [];
   if (firstUser) digest.push(firstUser);
-  for (const x of normalized.slice(-6)) if (x!==firstUser) digest.push(x);
+  const recent = normalized.slice(-6);
+  const earlierDecisions = normalized.slice(0, -6).flatMap(x => {
+    const line = x.text.split('\n').find(line => /^(?:[-*]\s+)?(?:decision:|decided |we agreed |we chose |do not |must )/i.test(line.trim()));
+    return line && x !== firstUser ? [{role: x.role, text: line.slice(0, 450)}] : [];
+  }).slice(-4);
+  for (const x of [...earlierDecisions, ...recent]) if (x!==firstUser) digest.push(x);
   return {info:after, archive:JSON.stringify({provider:'claude-agent-sdk',version:'0.3.306',session:after,messages,apiChainExhausted:exhausted,notice})+'\n', partial:true, notice:notice+(exhausted?' All API chain pages captured.':' Capture stopped at 200000 messages; more may exist.'), digest};
 }
 if (process.argv[1] && import.meta.url===pathToFileURL(process.argv[1]).href) {
@@ -64,7 +77,7 @@ if (process.argv[1] && import.meta.url===pathToFileURL(process.argv[1]).href) {
     process.stderr.write('BLINK:read-complete\n');
     process.stdout.write(JSON.stringify(result));
   } catch(error) {
-    const known=['Session identity mismatch','Project mismatch','Source changed; stop it and select again','No readable messages','Unstable pagination','History exceeds safe capture size','Invalid session','Unsupported operation'];
+    const known=['Session identity mismatch','Project mismatch','Source changed; stop it and select again','Chat is active; wait until idle','No readable messages','Unstable pagination','History exceeds safe capture size','Invalid session','Unsupported operation'];
     process.stderr.write('BLINK:error:'+(known.includes(error.message)?error.message:'Reader unavailable'));
     process.exitCode=1;
   }
